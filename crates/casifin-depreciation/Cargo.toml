@@ -1,0 +1,20 @@
+[package]
+name = "casifin-depreciation"
+description = "Depreciation calculations (SL, DDB) for the casifin financial computation engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+casifin-core = { path = "../casifin-core", version = "0.1.0" }
+rust_decimal = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+approx = { workspace = true }

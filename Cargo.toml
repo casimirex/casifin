@@ -1,0 +1,33 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/srinivasan/casifin"
+documentation = "https://docs.rs/casifin"
+readme = "README.md"
+keywords = ["finance", "accounting", "calculator", "npv", "irr"]
+categories = ["finance", "mathematics", "science"]
+
+[workspace.dependencies]
+# Core dependencies
+rust_decimal = { version = "1.35", features = ["maths", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+
+# Dev dependencies
+criterion = "0.5"
+proptest = "1.4"
+approx = "0.5"
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+[profile.bench]
+lto = true
+codegen-units = 1
