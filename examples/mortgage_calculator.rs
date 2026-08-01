@@ -8,7 +8,7 @@ use rust_decimal::Decimal;
 fn main() -> Result<(), CasifinError> {
     println!("=== Mortgage Calculator ===\n");
 
-    let casifin = Casifin::with_default_config();
+    let casifin = Casifin::with_defaults();
 
     // Loan parameters
     let principal = Money::from(300_000);

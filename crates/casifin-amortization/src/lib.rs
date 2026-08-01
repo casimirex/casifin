@@ -111,9 +111,9 @@ impl AmortizationBuilder {
     /// Creates a new `AmortizationBuilder`.
     ///
     /// # Arguments
-    /// * `principal` - The loan amount
-    /// * `rate` - The annual interest rate
-    /// * `term_months` - The loan term in months
+    /// * `principal` - The loan amount.
+    /// * `rate` - The annual interest rate.
+    /// * `term_months` - The loan term in months.
     ///
     /// # Panics
     /// This function does not panic.
@@ -129,6 +129,12 @@ impl AmortizationBuilder {
 
     /// Sets the solver configuration.
     ///
+    /// # Arguments
+    /// * `config` - The configuration to use.
+    ///
+    /// # Returns
+    /// The builder.
+    ///
     /// # Panics
     /// This function does not panic.
     pub fn with_config(mut self, config: Config) -> Self {
@@ -140,6 +146,12 @@ impl AmortizationBuilder {
     ///
     /// The modifier receives the period number and base payment,
     /// and returns the modified payment amount.
+    ///
+    /// # Arguments
+    /// * `modifier` - The modifier function.
+    ///
+    /// # Returns
+    /// The builder.
     ///
     /// # Panics
     /// This function does not panic.
@@ -162,18 +174,31 @@ impl AmortizationBuilder {
     /// # Panics
     /// This function does not panic.
     pub fn build(self) -> Result<AmortizationSchedule, CasifinError> {
-        if self.principal.is_zero() || self.principal.is_negative() {
+        if self.principal <= Money::ZERO {
             return Err(CasifinError::InvalidAmount(self.principal));
         }
         if self.term_months == 0 {
             return Err(CasifinError::InvalidPeriod(0));
         }
 
-        self.generate_schedule()
+        debug_assert!(self.principal > Money::ZERO, "principal must be positive");
+        debug_assert!(self.term_months > 0, "term_months must be positive");
+        debug_assert!(
+            self.rate.annual_rate >= Decimal::ZERO,
+            "annual_rate must be non-negative"
+        );
+
+        let schedule = self.generate_schedule()?;
+        self.verify_invariants(&schedule)?;
+        Ok(schedule)
     }
 
     /// Computes the monthly rate from the annual rate.
     fn monthly_rate(&self) -> Result<Decimal, CasifinError> {
+        debug_assert!(
+            self.rate.annual_rate >= Decimal::ZERO,
+            "annual_rate must be non-negative"
+        );
         self.rate
             .annual_rate
             .checked_div(Decimal::from(12))
@@ -186,14 +211,16 @@ impl AmortizationBuilder {
     fn generate_schedule(&self) -> Result<AmortizationSchedule, CasifinError> {
         let monthly_rate = self.monthly_rate()?;
 
-        // Compute base payment using TVM: pv = -principal, fv = 0, nper = term_months
+        // Compute base payment using TVM: pv = -principal, fv = 0, nper = term_months.
+        // PMT returns a negative outflow; take the absolute value for the schedule.
         let base_payment = casifin_tvm::pmt(
             self.rate,
             self.term_months,
             -self.principal,
             Money::ZERO,
             PaymentDue::End,
-        )?;
+        )?
+        .abs();
 
         let mut schedule = AmortizationSchedule::new();
         let mut balance = self.principal;
@@ -219,7 +246,7 @@ impl AmortizationBuilder {
             let mut actual_payment = payment;
             let mut actual_principal = principal_payment;
 
-            // If paying off early or final period, adjust to exact remaining balance
+            // If paying off early or final period, adjust to exact remaining balance.
             if new_balance <= Money::ZERO || period == self.term_months {
                 actual_payment = payment + new_balance;
                 actual_principal = balance;
@@ -246,7 +273,6 @@ impl AmortizationBuilder {
         schedule.total_interest = total_interest;
         schedule.total_principal = total_principal;
 
-        self.verify_invariants(&schedule)?;
         Ok(schedule)
     }
 
@@ -254,7 +280,7 @@ impl AmortizationBuilder {
     fn verify_invariants(&self, schedule: &AmortizationSchedule) -> Result<(), CasifinError> {
         let eps = self.config.eps;
 
-        // Final balance must be near zero
+        // Final balance must be near zero.
         let final_balance = schedule
             .entries
             .last()
@@ -270,7 +296,7 @@ impl AmortizationBuilder {
             });
         }
 
-        // Total principal should equal original principal
+        // Total principal should equal original principal.
         let principal_diff = (schedule.total_principal - self.principal).abs();
         if principal_diff.inner() > eps {
             return Err(CasifinError::ScheduleOverflow {
@@ -315,6 +341,9 @@ impl AmortizationBuilder {
 
 /// Configuration for an adjustable-rate mortgage (ARM) schedule.
 ///
+/// This type holds ARM parameters; full ARM schedule generation is left to
+/// future extensions.
+///
 /// # Panics
 /// This type does not panic.
 #[derive(Debug, Clone, PartialEq)]
@@ -341,6 +370,13 @@ impl ArmSchedule {
 
     /// Adds a rate adjustment.
     ///
+    /// # Arguments
+    /// * `period` - The period at which the rate changes.
+    /// * `rate` - The new rate.
+    ///
+    /// # Returns
+    /// The builder.
+    ///
     /// # Panics
     /// This function does not panic.
     pub fn with_adjustment(mut self, period: u32, rate: Rate) -> Self {
@@ -349,6 +385,12 @@ impl ArmSchedule {
     }
 
     /// Sets the periodic cap.
+    ///
+    /// # Arguments
+    /// * `cap` - The maximum change per adjustment.
+    ///
+    /// # Returns
+    /// The builder.
     ///
     /// # Panics
     /// This function does not panic.
@@ -359,6 +401,12 @@ impl ArmSchedule {
 
     /// Sets the lifetime cap.
     ///
+    /// # Arguments
+    /// * `cap` - The maximum rate over the life of the loan.
+    ///
+    /// # Returns
+    /// The builder.
+    ///
     /// # Panics
     /// This function does not panic.
     pub fn with_lifetime_cap(mut self, cap: Decimal) -> Self {
@@ -367,6 +415,12 @@ impl ArmSchedule {
     }
 
     /// Sets the lifetime floor.
+    ///
+    /// # Arguments
+    /// * `floor` - The minimum rate over the life of the loan.
+    ///
+    /// # Returns
+    /// The builder.
     ///
     /// # Panics
     /// This function does not panic.

@@ -19,6 +19,7 @@ pub use casifin_depreciation::{DepreciationMethod, DoubleDecliningBalance, Strai
 pub use casifin_inventory as inventory;
 pub use casifin_inventory::{Fifo, InventoryLot, InventoryMethod, Lifo, WeightedAverage};
 pub use casifin_ratios as ratios;
+pub use casifin_ratios::*;
 pub use casifin_tvm as tvm;
 pub use casifin_tvm::{fv, fv_uneven_cashflows, nper, pmt, pv, pv_perpetuity, rate};
 use rust_decimal::Decimal;
@@ -32,7 +33,7 @@ use rust_decimal::Decimal;
 /// use casifin_sdk::{Casifin, Money, Rate, Compounding, DayCount};
 /// use rust_decimal::Decimal;
 ///
-/// let casifin = Casifin::with_default_config();
+/// let casifin = Casifin::with_defaults();
 ///
 /// // Calculate a mortgage payment
 /// let principal = Money::from(200000);
@@ -52,13 +53,13 @@ impl Casifin {
     }
 
     /// Creates a `Casifin` with default configuration.
-    pub fn with_default_config() -> Self {
+    pub fn with_defaults() -> Self {
         Casifin::new(Config::default())
     }
 
     /// Returns the configuration.
-    pub fn config(&self) -> &Config {
-        &self.config
+    pub fn config(&self) -> Config {
+        self.config
     }
 
     /// Creates an amortization builder for a fixed-rate loan.
@@ -261,7 +262,7 @@ impl Casifin {
 
 impl Default for Casifin {
     fn default() -> Self {
-        Self::with_default_config()
+        Self::with_defaults()
     }
 }
 
@@ -271,13 +272,13 @@ mod tests {
 
     #[test]
     fn test_casifin_default_config() {
-        let casifin = Casifin::with_default_config();
+        let casifin = Casifin::with_defaults();
         assert_eq!(casifin.config().max_iterations, 1000);
     }
 
     #[test]
     fn test_casifin_mortgage() {
-        let casifin = Casifin::with_default_config();
+        let casifin = Casifin::with_defaults();
         let principal = Money::from(200000);
         let rate = Rate::new(Decimal::new(6, 2), Compounding::Discrete(12))
             .unwrap()
@@ -289,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_casifin_npv() {
-        let casifin = Casifin::with_default_config();
+        let casifin = Casifin::with_defaults();
         let flows = CashFlowStream::new(vec![
             CashFlow::new(Money::from(-1000)),
             CashFlow::new(Money::from(500)),
@@ -304,7 +305,7 @@ mod tests {
 
     #[test]
     fn test_casifin_irr() {
-        let casifin = Casifin::with_default_config();
+        let casifin = Casifin::with_defaults();
         let flows = CashFlowStream::new(vec![
             CashFlow::new(Money::from(-1000)),
             CashFlow::new(Money::from(500)),

@@ -1,9 +1,10 @@
 [package]
 name = "casifin-sdk"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-repository.workspace = true
+version = "0.1.0"
+edition = "2021"
+authors = ["casifin contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourorg/casifin"
 
 [dependencies]
 casifin-core = { path = "../casifin-core" }
@@ -14,14 +15,12 @@ casifin-ratios = { path = "../casifin-ratios" }
 casifin-depreciation = { path = "../casifin-depreciation" }
 casifin-inventory = { path = "../casifin-inventory" }
 rust_decimal = { workspace = true }
-chrono = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 approx = { workspace = true }
 criterion = { workspace = true }
-proptest = { workspace = true }
 
 [features]
 default = ["std"]

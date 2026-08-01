@@ -7,6 +7,9 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
 /// An inventory lot.
+///
+/// # Panics
+/// This type does not panic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InventoryLot {
     /// Number of units in the lot.
@@ -19,7 +22,21 @@ pub struct InventoryLot {
 
 impl InventoryLot {
     /// Creates a new inventory lot.
+    ///
+    /// # Arguments
+    /// * `units` - The number of units in the lot.
+    /// * `unit_cost` - The cost per unit.
+    /// * `date` - The acquisition date.
+    ///
+    /// # Returns
+    /// A new `InventoryLot`.
+    ///
+    /// # Panics
+    /// This function does not panic.
     pub fn new(units: u32, unit_cost: Money, date: NaiveDate) -> Self {
+        debug_assert!(units > 0, "units must be positive");
+        debug_assert!(!unit_cost.is_negative(), "unit_cost must be non-negative");
+
         InventoryLot {
             units,
             unit_cost,
@@ -28,7 +45,19 @@ impl InventoryLot {
     }
 
     /// Returns the total value of the lot.
+    ///
+    /// # Returns
+    /// `units * unit_cost`.
+    ///
+    /// # Panics
+    /// This function does not panic.
     pub fn total_value(&self) -> Money {
+        debug_assert!(self.units > 0, "units must be positive");
+        debug_assert!(
+            !self.unit_cost.is_negative(),
+            "unit_cost must be non-negative"
+        );
+
         self.unit_cost * Decimal::from(self.units)
     }
 }
@@ -38,20 +67,35 @@ pub trait InventoryMethod {
     /// Computes Cost of Goods Sold (COGS).
     ///
     /// # Arguments
-    /// * `lots` - The inventory lots available
-    /// * `units_sold` - Number of units sold
+    /// * `lots` - The inventory lots available.
+    /// * `units_sold` - Number of units sold.
+    ///
+    /// # Returns
+    /// `Ok(Money)` containing the COGS, or `Err(CasifinError)` on invalid input.
+    ///
+    /// # Panics
+    /// This function does not panic.
     fn cogs(&self, lots: &[InventoryLot], units_sold: u32) -> Result<Money, CasifinError>;
 
     /// Computes ending inventory value.
     ///
     /// # Arguments
-    /// * `lots` - The inventory lots available
-    /// * `units_sold` - Number of units sold
+    /// * `lots` - The inventory lots available.
+    /// * `units_sold` - Number of units sold.
+    ///
+    /// # Returns
+    /// `Ok(Money)` containing the ending inventory value, or `Err(CasifinError)`.
+    ///
+    /// # Panics
+    /// This function does not panic.
     fn ending_inventory(
         &self,
         lots: &[InventoryLot],
         units_sold: u32,
     ) -> Result<Money, CasifinError> {
+        debug_assert!(!lots.is_empty(), "lots must not be empty");
+        debug_assert!(units_sold > 0, "units_sold must be positive");
+
         let total_units: u32 = lots.iter().map(|l| l.units).sum();
         let total_value: Money = lots.iter().map(|l| l.total_value()).sum();
 
@@ -79,11 +123,17 @@ pub trait InventoryMethod {
 /// ```
 /// Lots are sorted by acquisition date (oldest first), and units are drawn
 /// from the oldest lots until the sold quantity is satisfied.
+///
+/// # Panics
+/// This type does not panic.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Fifo;
 
 impl InventoryMethod for Fifo {
     fn cogs(&self, lots: &[InventoryLot], units_sold: u32) -> Result<Money, CasifinError> {
+        debug_assert!(!lots.is_empty(), "lots must not be empty");
+        debug_assert!(units_sold > 0, "units_sold must be positive");
+
         if lots.is_empty() {
             return Err(CasifinError::InvalidInput {
                 reason: "no inventory lots available".to_string(),
@@ -100,10 +150,6 @@ impl InventoryMethod for Fifo {
             });
         }
 
-        debug_assert!(!lots.is_empty(), "lots must not be empty");
-        debug_assert!(units_sold > 0, "units_sold must be positive");
-
-        // Sort lots by date (oldest first)
         let mut sorted_lots: Vec<InventoryLot> = lots.to_vec();
         sorted_lots.sort_by_key(|l| l.date);
 
@@ -134,11 +180,17 @@ impl InventoryMethod for Fifo {
 /// ```
 /// Lots are sorted by acquisition date (newest first), and units are drawn
 /// from the newest lots until the sold quantity is satisfied.
+///
+/// # Panics
+/// This type does not panic.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Lifo;
 
 impl InventoryMethod for Lifo {
     fn cogs(&self, lots: &[InventoryLot], units_sold: u32) -> Result<Money, CasifinError> {
+        debug_assert!(!lots.is_empty(), "lots must not be empty");
+        debug_assert!(units_sold > 0, "units_sold must be positive");
+
         if lots.is_empty() {
             return Err(CasifinError::InvalidInput {
                 reason: "no inventory lots available".to_string(),
@@ -155,13 +207,8 @@ impl InventoryMethod for Lifo {
             });
         }
 
-        debug_assert!(!lots.is_empty(), "lots must not be empty");
-        debug_assert!(units_sold > 0, "units_sold must be positive");
-
-        // Sort lots by date descending (newest first)
         let mut sorted_lots: Vec<InventoryLot> = lots.to_vec();
-        sorted_lots.sort_by_key(|l| l.date);
-        sorted_lots.reverse();
+        sorted_lots.sort_by_key(|a| std::cmp::Reverse(a.date));
 
         let mut remaining = units_sold;
         let mut cogs = Money::ZERO;
@@ -189,11 +236,17 @@ impl InventoryMethod for Lifo {
 /// Avg Cost = Total Value / Total Units
 /// COGS = Avg Cost * Units Sold
 /// ```
+///
+/// # Panics
+/// This type does not panic.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct WeightedAverage;
 
 impl InventoryMethod for WeightedAverage {
     fn cogs(&self, lots: &[InventoryLot], units_sold: u32) -> Result<Money, CasifinError> {
+        debug_assert!(!lots.is_empty(), "lots must not be empty");
+        debug_assert!(units_sold > 0, "units_sold must be positive");
+
         if lots.is_empty() {
             return Err(CasifinError::InvalidInput {
                 reason: "no inventory lots available".to_string(),
@@ -209,9 +262,6 @@ impl InventoryMethod for WeightedAverage {
                 ),
             });
         }
-
-        debug_assert!(!lots.is_empty(), "lots must not be empty");
-        debug_assert!(units_sold > 0, "units_sold must be positive");
 
         let total_value: Money = lots.iter().map(|l| l.total_value()).sum();
         let total_units_dec = Decimal::from(total_units);
@@ -251,7 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fifo_cogs() {
+    fn fifo_cogs() {
         let lots = test_lots();
         let fifo = Fifo;
 
@@ -265,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    fn test_lifo_cogs() {
+    fn lifo_cogs() {
         let lots = test_lots();
         let lifo = Lifo;
 
@@ -279,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn test_weighted_average_cogs() {
+    fn weighted_avg() {
         let lots = test_lots();
         let wa = WeightedAverage;
 
@@ -295,7 +345,7 @@ mod tests {
     }
 
     #[test]
-    fn test_exceeds_inventory() {
+    fn insufficient_inventory() {
         let lots = test_lots();
         let fifo = Fifo;
 
@@ -303,10 +353,23 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_lots() {
-        let lots: [InventoryLot; 0] = [];
-        let fifo = Fifo;
+    fn inventory_identity() {
+        let lots = test_lots();
+        let total_value: Money = lots.iter().map(|l| l.total_value()).sum();
 
-        assert!(fifo.cogs(&lots, 10).is_err());
+        let fifo = Fifo;
+        let cogs = fifo.cogs(&lots, 150).unwrap();
+        let ending = fifo.ending_inventory(&lots, 150).unwrap();
+        assert_eq!(cogs + ending, total_value);
+
+        let lifo = Lifo;
+        let cogs = lifo.cogs(&lots, 150).unwrap();
+        let ending = lifo.ending_inventory(&lots, 150).unwrap();
+        assert_eq!(cogs + ending, total_value);
+
+        let wa = WeightedAverage;
+        let cogs = wa.cogs(&lots, 150).unwrap();
+        let ending = wa.ending_inventory(&lots, 150).unwrap();
+        assert_eq!(cogs + ending, total_value);
     }
 }

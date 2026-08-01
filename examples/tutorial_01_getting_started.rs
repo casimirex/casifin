@@ -9,7 +9,7 @@ fn main() -> Result<(), CasifinError> {
     println!("=== Getting Started with casifin ===\n");
 
     // Create the main casifin instance
-    let casifin = Casifin::with_default_config();
+    let casifin = Casifin::with_defaults();
 
     // Example 1: Future Value of a lump sum
     println!("1. Future Value of $10,000 at 5% for 10 years:");

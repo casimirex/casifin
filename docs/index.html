@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>casifin — Financial Computation Engine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0b1020;
+            --bg-elevated: #121a2e;
+            --bg-card: #18233a;
+            --bg-code: #0d1425;
+            --text: #e8efff;
+            --text-muted: #8fa4c7;
+            --accent: #4cc9f0;
+            --accent-2: #4895ef;
+            --success: #4ade80;
+            --warning: #fbbf24;
+            --danger: #f87171;
+            --border: #253555;
+            --radius: 14px;
+            --shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+            --max-width: 1200px;
+            --hero-grad-1: rgba(76, 201, 240, 0.12);
+            --hero-grad-2: rgba(72, 149, 239, 0.10);
+            --table-head: #121a2e;
+        }
+
+        [data-theme="light"] {
+            --bg: #f6f8fc;
+            --bg-elevated: #eef2f7;
+            --bg-card: #ffffff;
+            --bg-code: #f2f5fa;
+            --text: #0b1020;
+            --text-muted: #52627a;
+            --accent: #0b84c3;
+            --accent-2: #2563eb;
+            --success: #16a34a;
+            --warning: #b45309;
+            --danger: #dc2626;
+            --border: #d6dee8;
+            --shadow: 0 8px 30px rgba(11, 16, 32, 0.10);
+            --hero-grad-1: rgba(11, 132, 195, 0.10);
+            --hero-grad-2: rgba(37, 99, 235, 0.08);
+            --table-head: #eef2f7;
+        }
+
+        * { box-sizing: border-box; }
+
+        html { scroll-behavior: smooth; }
+
+        body {
+            margin: 0;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.65;
+            transition: background 0.3s ease, color 0.3s ease;
+        }
+
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        /* Navigation */
+        nav {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(var(--bg-rgb, 11, 16, 32), 0.92);
+            backdrop-filter: blur(14px);
+            border-bottom: 1px solid var(--border);
+            transition: background 0.3s ease;
+        }
+
+        nav .container {
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: 64px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 700;
+            font-size: 1.35rem;
+            letter-spacing: -0.5px;
+        }
+
+        .brand .logo {
+            width: 34px;
+            height: 34px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-2));
+            display: grid;
+            place-items: center;
+            color: #fff;
+            font-weight: 800;
+            font-size: 1rem;
+        }
+
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 28px;
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            font-weight: 500;
+            font-size: 0.95rem;
+        }
+
+        .nav-links a { color: var(--text-muted); }
+        .nav-links a:hover { color: var(--text); }
+
+        .icon-btn {
+            width: 38px;
+            height: 38px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: grid;
+            place-items: center;
+            transition: border-color 0.2s, color 0.2s;
+        }
+
+        .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+        .github {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            font-weight: 500;
+            font-size: 0.9rem;
+            transition: border-color 0.2s, color 0.2s;
+        }
+
+        .github:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+
+        .hamburger { display: none; }
+
+        /* Hero */
+        header.hero {
+            position: relative;
+            overflow: hidden;
+            padding: 110px 24px 100px;
+            text-align: center;
+            background:
+                radial-gradient(circle at 30% 20%, var(--hero-grad-1), transparent 45%),
+                radial-gradient(circle at 70% 80%, var(--hero-grad-2), transparent 45%),
+                var(--bg);
+            transition: background 0.3s ease;
+        }
+
+        .hero h1 {
+            font-size: clamp(2.6rem, 7vw, 4.2rem);
+            margin: 0 0 18px;
+            line-height: 1.1;
+            letter-spacing: -1.5px;
+            background: linear-gradient(135deg, var(--text) 30%, var(--accent) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero p.tagline {
+            font-size: clamp(1.1rem, 2.4vw, 1.45rem);
+            color: var(--text-muted);
+            max-width: 680px;
+            margin: 0 auto 36px;
+        }
+
+        .badges {
+            display: flex;
+            justify-content: center;
+            gap: 14px;
+            flex-wrap: wrap;
+            margin-bottom: 38px;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 14px;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            border: 1px solid var(--border);
+            background: var(--bg-elevated);
+            color: var(--text-muted);
+        }
+
+        .badge.success { color: var(--success); border-color: rgba(var(--success-rgb, 74, 222, 128), 0.35); }
+        .badge.warn { color: var(--warning); border-color: rgba(var(--warning-rgb, 251, 191, 36), 0.35); }
+
+        .cta-row {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 14px 26px;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 1rem;
+            transition: transform 0.15s, box-shadow 0.2s;
+        }
+
+        .btn:hover { transform: translateY(-2px); text-decoration: none; }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent), var(--accent-2));
+            color: #fff;
+            box-shadow: 0 4px 18px rgba(11, 132, 195, 0.35);
+        }
+
+        .btn-secondary {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text);
+        }
+
+        /* Layout */
+        .container {
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        section {
+            padding: 80px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        section:last-of-type { border-bottom: none; }
+
+        h2 {
+            font-size: 2rem;
+            margin: 0 0 18px;
+            letter-spacing: -0.8px;
+        }
+
+        h3 {
+            font-size: 1.35rem;
+            margin: 36px 0 14px;
+            color: var(--accent);
+        }
+
+        .lead {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            max-width: 760px;
+            margin-bottom: 42px;
+        }
+
+        /* Cards */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 22px;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 26px;
+            transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(var(--accent-rgb, 76, 201, 240), 0.45);
+            box-shadow: var(--shadow);
+        }
+
+        .card .icon {
+            width: 46px;
+            height: 46px;
+            border-radius: 12px;
+            display: grid;
+            place-items: center;
+            font-size: 1.3rem;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, rgba(var(--accent-rgb, 76, 201, 240), 0.18), rgba(var(--accent-2-rgb, 72, 149, 239), 0.18));
+            border: 1px solid var(--border);
+        }
+
+        .card h4 {
+            margin: 0 0 10px;
+            font-size: 1.15rem;
+        }
+
+        .card p {
+            margin: 0;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        .card a {
+            display: inline-block;
+            margin-top: 16px;
+            font-weight: 600;
+            font-size: 0.92rem;
+        }
+
+        /* Code blocks */
+        pre, code {
+            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        }
+
+        pre {
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px 22px;
+            overflow-x: auto;
+            font-size: 0.88rem;
+            line-height: 1.55;
+            position: relative;
+            transition: background 0.3s ease;
+        }
+
+        pre .lang {
+            position: absolute;
+            top: 10px;
+            right: 44px;
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .copy-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 30px;
+            height: 30px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: var(--bg-elevated);
+            color: var(--text-muted);
+            cursor: pointer;
+            display: grid;
+            place-items: center;
+            opacity: 0;
+            transition: opacity 0.2s, color 0.2s;
+        }
+
+        pre:hover .copy-btn { opacity: 1; }
+        .copy-btn:hover { color: var(--accent); }
+        .copy-btn.copied { color: var(--success); border-color: var(--success); }
+
+        code {
+            background: rgba(var(--accent-rgb, 76, 201, 240), 0.12);
+            color: var(--accent);
+            padding: 2px 7px;
+            border-radius: 6px;
+            font-size: 0.9em;
+        }
+
+        pre code {
+            background: transparent;
+            color: inherit;
+            padding: 0;
+            border-radius: 0;
+            font-size: inherit;
+        }
+
+        .example-block { margin-top: 18px; }
+
+        .example-block label {
+            display: block;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.7px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        /* Feature table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 18px;
+            font-size: 0.95rem;
+        }
+
+        th, td {
+            padding: 14px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            color: var(--accent);
+            font-weight: 600;
+            background: var(--table-head);
+        }
+
+        td code { font-size: 0.85em; }
+
+        /* Safety banner */
+        .safety-banner {
+            background: linear-gradient(135deg, rgba(var(--success-rgb, 74, 222, 128), 0.10), rgba(var(--accent-rgb, 76, 201, 240), 0.08));
+            border: 1px solid rgba(var(--success-rgb, 74, 222, 128), 0.25);
+            border-radius: var(--radius);
+            padding: 24px;
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+        }
+
+        .safety-banner .shield {
+            font-size: 2rem;
+            line-height: 1;
+        }
+
+        .safety-banner h4 { margin: 0 0 8px; font-size: 1.15rem; }
+        .safety-banner p { margin: 0; color: var(--text-muted); }
+
+        /* Tutorials */
+        .steps {
+            display: grid;
+            gap: 22px;
+            counter-reset: step;
+        }
+
+        .step {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+        }
+
+        .step::before {
+            counter-increment: step;
+            content: counter(step);
+            flex-shrink: 0;
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent), var(--accent-2));
+            color: #fff;
+            display: grid;
+            place-items: center;
+            font-weight: 700;
+        }
+
+        .step h4 { margin: 0 0 8px; }
+        .step p { margin: 0 0 14px; color: var(--text-muted); }
+
+        /* Back to top */
+        #backToTop {
+            position: fixed;
+            right: 24px;
+            bottom: 24px;
+            width: 46px;
+            height: 46px;
+            border-radius: 50%;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-muted);
+            cursor: pointer;
+            display: grid;
+            place-items: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.25s, transform 0.2s, border-color 0.2s;
+            box-shadow: var(--shadow);
+            z-index: 90;
+        }
+
+        #backToTop.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        #backToTop:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+            transform: translateY(-2px);
+        }
+
+        /* Footer */
+        footer {
+            border-top: 1px solid var(--border);
+            padding: 50px 24px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        footer .links {
+            display: flex;
+            justify-content: center;
+            gap: 24px;
+            margin-bottom: 18px;
+            list-style: none;
+            padding: 0;
+        }
+
+        /* Toast */
+        #toast {
+            position: fixed;
+            left: 50%;
+            bottom: 30px;
+            transform: translateX(-50%) translateY(20px);
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 12px 22px;
+            border-radius: 999px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.25s, transform 0.25s;
+            z-index: 110;
+            box-shadow: var(--shadow);
+        }
+
+        #toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        @media (max-width: 760px) {
+            .nav-links {
+                display: none;
+                position: absolute;
+                top: 64px;
+                left: 0;
+                right: 0;
+                flex-direction: column;
+                gap: 0;
+                background: var(--bg-elevated);
+                border-bottom: 1px solid var(--border);
+                padding: 12px 24px 18px;
+            }
+            .nav-links.open { display: flex; }
+            .nav-links li { padding: 10px 0; }
+            .hamburger { display: grid; }
+            .hero { padding: 70px 20px 60px; }
+            section { padding: 56px 0; }
+            .safety-banner { flex-direction: column; }
+            .copy-btn { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="container">
+            <a class="brand" href="#top">
+                <span class="logo">C</span>
+                casifin
+            </a>
+            <div class="nav-right">
+                <ul class="nav-links" id="navLinks">
+                    <li><a href="#features">Features</a></li>
+                    <li><a href="#safety">Safety</a></li>
+                    <li><a href="#tutorials">Tutorials</a></li>
+                    <li><a href="#sdk">SDK</a></li>
+                    <li><a href="#crates">Crates</a></li>
+                </ul>
+                <button class="icon-btn" id="themeToggle" aria-label="Toggle dark/light mode" title="Toggle theme">
+                    <span id="themeIcon">🌙</span>
+                </button>
+                <button class="icon-btn hamburger" id="hamburger" aria-label="Open menu">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+                </button>
+                <a class="github" href="https://github.com/yourorg/casifin" target="_blank" rel="noopener">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23a11.52 11.52 0 0 1 3-.405c1.02 0 2.04.135 3 .405 2.28-1.56 3.285-1.23 3.285-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12Z"/></svg>
+                    GitHub
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <header id="top" class="hero">
+        <div class="container">
+            <h1>Precision financial math,<br>engineered for safety.</h1>
+            <p class="tagline">
+                <strong>casifin</strong> is a Rust workspace for production-grade financial
+                computation. TVM, cash flow analysis, amortization, ratios, depreciation,
+                inventory, and more — all built with NASA/JPL Power-of-Ten rigor.
+            </p>
+            <div class="badges">
+                <span class="badge success">#![deny(warnings)]</span>
+                <span class="badge success">No unwrap in library code</span>
+                <span class="badge warn">Decimal-only money</span>
+                <span class="badge success">MIT OR Apache-2.0</span>
+            </div>
+            <div class="cta-row">
+                <a class="btn btn-primary" href="#tutorials">Get Started</a>
+                <a class="btn btn-secondary" href="#crates">Explore Crates</a>
+            </div>
+        </div>
+    </header>
+
+    <section id="features">
+        <div class="container">
+            <h2>Everything you need</h2>
+            <p class="lead">
+                From basic present-value calculations to full mortgage schedules and portfolio
+                ratios, casifin covers the complete CFA/CPA quantitative toolkit.
+            </p>
+            <div class="grid">
+                <div class="card">
+                    <div class="icon">💰</div>
+                    <h4>Time Value of Money</h4>
+                    <p>PV, FV, PMT, NPER, RATE, perpetuities, and uneven cash flows with exact decimal arithmetic.</p>
+                </div>
+                <div class="card">
+                    <div class="icon">📈</div>
+                    <h4>Cash Flow Analysis</h4>
+                    <p>NPV, IRR, XNPV, and XIRR using hybrid Newton-Raphson / bisection solvers.</p>
+                </div>
+                <div class="card">
+                    <div class="icon">🏠</div>
+                    <h4>Amortization</h4>
+                    <p>Fixed-rate and ARM schedule generation with payment modifiers and invariant checks.</p>
+                </div>
+                <div class="card">
+                    <div class="icon">📊</div>
+                    <h4>Financial Ratios</h4>
+                    <p>Liquidity, solvency, profitability, returns, yields, rates, and statistics.</p>
+                </div>
+                <div class="card">
+                    <div class="icon">🏭</div>
+                    <h4>Depreciation</h4>
+                    <p>Straight-line and double-declining balance with automatic straight-line switch.</p>
+                </div>
+                <div class="card">
+                    <div class="icon">📦</div>
+                    <h4>Inventory Costing</h4>
+                    <p>FIFO, LIFO, and weighted-average COGS and ending inventory calculations.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="safety">
+        <div class="container">
+            <h2>NASA-grade safety by default</h2>
+            <p class="lead">
+                Every line of library code follows rules adapted from the NASA/JPL Power of Ten.
+                We check arithmetic, bound loops, and propagate every error explicitly.
+            </p>
+            <div class="safety-banner">
+                <div class="shield">🛡️</div>
+                <div>
+                    <h4>Defensive arithmetic</h4>
+                    <p>
+                        All business-logic functions use <code>rust_decimal</code>
+                        <code>checked_add</code>, <code>checked_sub</code>,
+                        <code>checked_mul</code>, <code>checked_div</code>,
+                        <code>checked_powi</code>, <code>checked_powd</code>, and
+                        <code>checked_ln</code>. Overflow and division-by-zero map to typed
+                        <code>CasifinError</code> variants and are propagated with <code>?</code>.
+                    </p>
+                </div>
+            </div>
+
+            <h3>Non-negotiable rules</h3>
+            <table>
+                <thead>
+                    <tr><th>Rule</th><th>How casifin implements it</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>#![deny(warnings)]</code></td><td>Every crate <code>lib.rs</code></td></tr>
+                    <tr><td>No <code>unwrap()</code> / <code>expect()</code></td><td>Verified by clippy <code>unwrap_used</code> / <code>expect_used</code> lints</td></tr>
+                    <tr><td>Checked arithmetic</td><td>All money and rate calculations use checked decimal ops</td></tr>
+                    <tr><td>Max 60 lines per function</td><td>Enforced by code review and kept in style</td></tr>
+                    <tr><td>Cyclomatic complexity ≤ 10</td><td>Clippy <code>cognitive_complexity = deny</code></td></tr>
+                    <tr><td>Two assertions per function</td><td><code>debug_assert!</code> preconditions on every public API</td></tr>
+                    <tr><td>Money uses <code>Decimal</code></td><td>Never <code>f64</code>; <code>Money</code> is a precision newtype</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section id="tutorials">
+        <div class="container">
+            <h2>Quick-start tutorials</h2>
+            <p class="lead">
+                Copy, paste, and run. Every snippet uses the <code>casifin_sdk</code> entry point
+                so you only import one crate.
+            </p>
+
+            <div class="steps">
+                <div class="step">
+                    <div>
+                        <h4>1. Add casifin to your project</h4>
+                        <p>Put this in your <code>Cargo.toml</code> and import the SDK.</p>
+                        <div class="example-block">
+                            <label>Cargo.toml</label>
+                            <pre><span class="lang">toml</span><button class="copy-btn" aria-label="Copy code">📋</button><code>[dependencies]
+casifin_sdk = { path = "crates/casifin-sdk" }
+rust_decimal = "1.35"
+</code></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div>
+                        <h4>2. Your first calculation</h4>
+                        <p>Create the engine, build a rate, and compute the future value of a lump sum.</p>
+                        <div class="example-block">
+                            <label>main.rs</label>
+                            <pre><span class="lang">rust</span><button class="copy-btn" aria-label="Copy code">📋</button><code>use casifin_sdk::*;
+use rust_decimal::Decimal;
+
+fn main() -> Result&lt;(), CasifinError&gt; {
+    let engine = Casifin::with_defaults();
+    let rate = Rate::new(Decimal::new(5, 2), Compounding::Discrete(1))?;
+    let fv = engine.fv(rate, 10, Money::ZERO, Money::from(10_000), PaymentDue::End)?;
+    println!("Future value: {}", fv);
+    Ok(())
+}
+</code></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div>
+                        <h4>3. Calculate a mortgage</h4>
+                        <p>Generate a full 30-year amortization schedule and inspect the first payment.</p>
+                        <div class="example-block">
+                            <label>examples/mortgage_calculator.rs</label>
+                            <pre><span class="lang">rust</span><button class="copy-btn" aria-label="Copy code">📋</button><code>let engine = Casifin::with_defaults();
+let principal = Money::from(300_000);
+let rate = Rate::new(Decimal::new(425, 4), Compounding::Discrete(12))?
+    .with_convention(DayCount::Actual365);
+let schedule = engine.mortgage(principal, rate, 360).build()?;
+
+println!("Monthly payment: {}", schedule.entries[0].payment);
+println!("Total interest: {}", schedule.total_interest);
+</code></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div>
+                        <h4>4. Evaluate an investment</h4>
+                        <p>Compute NPV and IRR for a project with uneven cash flows.</p>
+                        <div class="example-block">
+                            <label>examples/investment_analysis.rs</label>
+                            <pre><span class="lang">rust</span><button class="copy-btn" aria-label="Copy code">📋</button><code>let flows = CashFlowStream::new(vec![
+    CashFlow::new(Money::from(-100_000)),
+    CashFlow::new(Money::from(15_000)),
+    CashFlow::new(Money::from(15_000)),
+    CashFlow::new(Money::from(15_000)),
+    CashFlow::new(Money::from(15_000)),
+    CashFlow::new(Money::from(565_000)),
+]);
+
+let npv = engine.npv(Decimal::new(10, 2), &flows)?;
+let irr = engine.irr(&flows)?;
+</code></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="sdk">
+        <div class="container">
+            <h2>SDK usage guide</h2>
+            <p class="lead">
+                The <code>Casifin</code> struct is the unified facade. It carries a
+                <code>Config</code> and forwards calls to the underlying crates.
+            </p>
+
+            <h3>Construction</h3>
+            <pre><span class="lang">rust</span><button class="copy-btn" aria-label="Copy code">📋</button><code>let engine = Casifin::with_defaults();     // eps=1e-12, max_iter=1000, guess=0.1
+let custom = Casifin::new(Config::builder().eps(Decimal::new(1, 10)).build());
+</code></pre>
+
+            <h3>TVM shortcuts</h3>
+            <pre><span class="lang">rust</span><button class="copy-btn" aria-label="Copy code">📋</button><code>let pv = engine.pv(rate, nper, pmt, fv, PaymentDue::End)?;
+let fv = engine.fv(rate, nper, pmt, pv, PaymentDue::End)?;
+let pmt = engine.pmt(rate, nper, pv, fv, PaymentDue::End)?;
+let nper = engine.nper(rate, pmt, pv, fv, PaymentDue::End)?;
+let rate = engine.rate(nper, pmt, pv, fv, PaymentDue::End)?;
+</code></pre>
+
+            <h3>Cash flow analysis</h3>
+            <pre><span class="lang">rust</span><button class="copy-btn" aria-label="Copy code">📋</button><code>let npv  = engine.npv(Decimal::new(8, 2), &flows)?;
+let irr  = engine.irr(&flows)?;
+let xnpv = engine.xnpv(Decimal::new(8, 2), &dated_flows)?;
+let xirr = engine.xirr(&dated_flows)?;
+</code></pre>
+
+            <h3>Amortization builder</h3>
+            <pre><span class="lang">rust</span><button class="copy-btn" aria-label="Copy code">📋</button><code>let schedule = engine
+    .mortgage(principal, rate, 360)
+    .with_payment_modifier(|_period, base| base + Money::from(200))
+    .build()?;
+</code></pre>
+
+            <h3>Ratio functions</h3>
+            <p>
+                Ratio functions are glob-re-exported from <code>casifin_ratios</code>, so you can
+                call them directly through the SDK:
+            </p>
+            <pre><span class="lang">rust</span><button class="copy-btn" aria-label="Copy code">📋</button><code>use casifin_sdk::*;
+
+let current = current_ratio(Money::from(500_000), Money::from(250_000))?;
+let roe     = return_on_equity(Money::from(100_000), Money::from(500_000))?;
+let sharpe  = sharpe_ratio(Decimal::new(12, 2), Decimal::new(3, 2), Decimal::new(15, 2))?;
+</code></pre>
+
+            <h3>Depreciation & inventory</h3>
+            <pre><span class="lang">rust</span><button class="copy-btn" aria-label="Copy code">📋</button><code>let sl = StraightLine;
+let dep = sl.depreciate(Money::from(10_000), Money::from(2_000), 5, 1)?;
+
+let fifo = Fifo;
+let cogs = fifo.cogs(&lots, 150)?;
+</code></pre>
+        </div>
+    </section>
+
+    <section id="crates">
+        <div class="container">
+            <h2>Crate reference</h2>
+            <p class="lead">
+                The workspace is split by domain. Each crate is independently testable and can be
+                used directly if you only need one capability.
+            </p>
+            <table>
+                <thead>
+                    <tr><th>Crate</th><th>Purpose</th><th>Key types / functions</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>casifin-core</code></td><td>Shared primitives</td><td><code>Money</code>, <code>Rate</code>, <code>Config</code>, <code>CasifinError</code></td></tr>
+                    <tr><td><code>casifin-tvm</code></td><td>Time value of money</td><td><code>pv</code>, <code>fv</code>, <code>pmt</code>, <code>nper</code>, <code>rate</code></td></tr>
+                    <tr><td><code>casifin-cashflow</code></td><td>Cash flow analysis</td><td><code>npv</code>, <code>irr</code>, <code>xnpv</code>, <code>xirr</code></td></tr>
+                    <tr><td><code>casifin-amortization</code></td><td>Loan schedules</td><td><code>AmortizationBuilder</code>, <code>AmortizationSchedule</code></td></tr>
+                    <tr><td><code>casifin-ratios</code></td><td>Financial ratios</td><td><code>current_ratio</code>, <code>sharpe_ratio</code>, <code>effective_annual_rate</code></td></tr>
+                    <tr><td><code>casifin-depreciation</code></td><td>Asset depreciation</td><td><code>StraightLine</code>, <code>DoubleDecliningBalance</code></td></tr>
+                    <tr><td><code>casifin-inventory</code></td><td>Inventory costing</td><td><code>Fifo</code>, <code>Lifo</code>, <code>WeightedAverage</code></td></tr>
+                    <tr><td><code>casifin-sdk</code></td><td>Unified API</td><td><code>Casifin</code> facade</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section>
+        <div class="container">
+            <h2>Run the examples</h2>
+            <p class="lead">
+                Four runnable examples ship with the workspace. Each demonstrates a real-world
+                workflow.
+            </p>
+            <div class="grid">
+                <div class="card">
+                    <h4>Getting Started</h4>
+                    <p>Basic FV, PV, PMT, NPER, and RATE in one tutorial.</p>
+                    <a href="#">cargo run --example tutorial_01_getting_started</a>
+                </div>
+                <div class="card">
+                    <h4>Mortgage Calculator</h4>
+                    <p>Fixed-rate vs extra-principal comparison with full schedules.</p>
+                    <a href="#">cargo run --example mortgage_calculator</a>
+                </div>
+                <div class="card">
+                    <h4>Investment Analysis</h4>
+                    <p>NPV/IRR for a 5-year real-estate project with sensitivity.</p>
+                    <a href="#">cargo run --example investment_analysis</a>
+                </div>
+                <div class="card">
+                    <h4>Bond Pricing</h4>
+                    <p>PV of coupons and face value, current yield, and price sensitivity.</p>
+                    <a href="#">cargo run --example bond_pricing</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <ul class="links">
+            <li><a href="#features">Features</a></li>
+            <li><a href="#tutorials">Tutorials</a></li>
+            <li><a href="#sdk">SDK</a></li>
+            <li><a href="https://github.com/yourorg/casifin">GitHub</a></li>
+        </ul>
+        <p>© 2026 casifin contributors. Licensed under MIT OR Apache-2.0.</p>
+    </footer>
+
+    <button id="backToTop" aria-label="Back to top">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 15l-6-6-6 6"/></svg>
+    </button>
+    <div id="toast">Copied to clipboard</div>
+
+    <script>
+        const root = document.documentElement;
+        const themeToggle = document.getElementById('themeToggle');
+        const themeIcon = document.getElementById('themeIcon');
+        const navLinks = document.getElementById('navLinks');
+        const hamburger = document.getElementById('hamburger');
+        const backToTop = document.getElementById('backToTop');
+        const toast = document.getElementById('toast');
+
+        function setTheme(theme) {
+            if (theme === 'light') {
+                document.body.setAttribute('data-theme', 'light');
+                themeIcon.textContent = '☀️';
+            } else {
+                document.body.removeAttribute('data-theme');
+                themeIcon.textContent = '🌙';
+            }
+            localStorage.setItem('casifin-theme', theme);
+        }
+
+        const savedTheme = localStorage.getItem('casifin-theme');
+        if (savedTheme) {
+            setTheme(savedTheme);
+        } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+            setTheme('light');
+        }
+
+        themeToggle.addEventListener('click', () => {
+            const isLight = document.body.getAttribute('data-theme') === 'light';
+            setTheme(isLight ? 'dark' : 'light');
+        });
+
+        hamburger.addEventListener('click', () => {
+            navLinks.classList.toggle('open');
+        });
+
+        document.querySelectorAll('.nav-links a').forEach(link => {
+            link.addEventListener('click', () => navLinks.classList.remove('open'));
+        });
+
+        window.addEventListener('scroll', () => {
+            if (window.scrollY > 500) {
+                backToTop.classList.add('visible');
+            } else {
+                backToTop.classList.remove('visible');
+            }
+        });
+
+        backToTop.addEventListener('click', () => {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+
+        function showToast(message) {
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 1800);
+        }
+
+        document.querySelectorAll('.copy-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const pre = btn.parentElement;
+                const code = pre.querySelector('code');
+                const text = code ? code.innerText : pre.innerText;
+                try {
+                    await navigator.clipboard.writeText(text.trim());
+                    btn.classList.add('copied');
+                    btn.textContent = '✓';
+                    showToast('Copied to clipboard');
+                    setTimeout(() => {
+                        btn.classList.remove('copied');
+                        btn.textContent = '📋';
+                    }, 1500);
+                } catch (err) {
+                    showToast('Copy failed');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

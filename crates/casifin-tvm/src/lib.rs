@@ -15,6 +15,23 @@ use casifin_core::{CasifinError, Config, Money, PaymentDue, Rate};
 use rust_decimal::{Decimal, MathematicalOps};
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+/// Converts a `PaymentDue` value into the numeric flag used by TVM formulas.
+///
+/// `End` maps to `0`, `Beginning` maps to `1`.
+///
+/// # Panics
+/// This function does not panic.
+fn due_flag(due: PaymentDue) -> Decimal {
+    match due {
+        PaymentDue::End => Decimal::ZERO,
+        PaymentDue::Beginning => Decimal::ONE,
+    }
+}
+
+// ============================================================================
 // Present Value
 // ============================================================================
 
@@ -28,11 +45,11 @@ use rust_decimal::{Decimal, MathematicalOps};
 /// ```
 ///
 /// # Arguments
-/// * `rate` - The interest rate per period
-/// * `nper` - The total number of payment periods
-/// * `pmt` - The payment made each period
-/// * `fv` - The future value (cash balance after last payment)
-/// * `due` - Whether payments are due at beginning or end of period
+/// * `rate` - The interest rate per period.
+/// * `nper` - The total number of payment periods.
+/// * `pmt` - The payment made each period.
+/// * `fv` - The future value (cash balance after last payment).
+/// * `due` - Whether payments are due at beginning or end of period.
 ///
 /// # Returns
 /// `Ok(Money)` containing the present value, or `Err(CasifinError)` on invalid input.
@@ -57,6 +74,10 @@ pub fn pv(
     due: PaymentDue,
 ) -> Result<Money, CasifinError> {
     debug_assert!(nper > 0, "nper must be positive");
+    debug_assert!(
+        rate.annual_rate >= Decimal::ZERO,
+        "annual_rate must be non-negative"
+    );
 
     if nper == 0 {
         return Err(CasifinError::InvalidPeriod(0));
@@ -66,31 +87,70 @@ pub fn pv(
     let one = Decimal::ONE;
 
     if r.is_zero() {
-        let total_pmt = pmt * Decimal::from(nper);
-        return Ok(fv + total_pmt);
+        let total_pmt = (pmt * Decimal::from(nper)).inner();
+        let pv_zero = fv
+            .inner()
+            .checked_add(total_pmt)
+            .ok_or(CasifinError::ScheduleOverflow {
+                detail: "pv: zero-rate overflow".to_string(),
+            })?;
+        return Ok(Money::from_decimal(
+            pv_zero
+                .checked_mul(Decimal::NEGATIVE_ONE)
+                .ok_or(CasifinError::ScheduleOverflow {
+                    detail: "negation overflow".to_string(),
+                })?,
+        ));
     }
 
-    let base = one + r;
+    let base = one.checked_add(r).ok_or(CasifinError::ScheduleOverflow {
+        detail: "pv: base overflow".to_string(),
+    })?;
     let neg_power = base
         .checked_powi(-(nper as i64))
         .ok_or(CasifinError::ScheduleOverflow {
             detail: "pv: power calculation overflow".to_string(),
         })?;
 
-    let annuity_factor = (one - neg_power)
-        .checked_div(r)
-        .ok_or(CasifinError::DivisionByZero {
-            operation: "pv annuity factor",
+    let one_minus_neg_power = one
+        .checked_sub(neg_power)
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "pv: subtraction overflow".to_string(),
         })?;
+    let annuity_factor =
+        one_minus_neg_power
+            .checked_div(r)
+            .ok_or(CasifinError::DivisionByZero {
+                operation: "pv annuity factor",
+            })?;
 
-    let pv_pmt = match due {
-        PaymentDue::End => pmt * annuity_factor,
-        PaymentDue::Beginning => pmt * annuity_factor * base,
+    let due_mult = match due {
+        PaymentDue::End => Decimal::ONE,
+        PaymentDue::Beginning => base,
     };
 
-    let fv_discounted = fv * neg_power;
+    let pv_pmt = pmt
+        .inner()
+        .checked_mul(annuity_factor)
+        .and_then(|v| v.checked_mul(due_mult))
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "pv: payment term overflow".to_string(),
+        })?;
 
-    Ok(pv_pmt + fv_discounted)
+    let fv_discounted =
+        fv.inner()
+            .checked_mul(neg_power)
+            .ok_or(CasifinError::ScheduleOverflow {
+                detail: "pv: fv discount overflow".to_string(),
+            })?;
+
+    let result = pv_pmt
+        .checked_add(fv_discounted)
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "pv: result overflow".to_string(),
+        })?;
+
+    Ok(Money::from_decimal(result))
 }
 
 // ============================================================================
@@ -107,11 +167,11 @@ pub fn pv(
 /// ```
 ///
 /// # Arguments
-/// * `rate` - The interest rate per period
-/// * `nper` - The total number of payment periods
-/// * `pmt` - The payment made each period
-/// * `pv` - The present value (initial investment)
-/// * `due` - Whether payments are due at beginning or end of period
+/// * `rate` - The interest rate per period.
+/// * `nper` - The total number of payment periods.
+/// * `pmt` - The payment made each period.
+/// * `pv` - The present value (initial investment).
+/// * `due` - Whether payments are due at beginning or end of period.
 ///
 /// # Returns
 /// `Ok(Money)` containing the future value, or `Err(CasifinError)` on invalid input.
@@ -126,6 +186,10 @@ pub fn fv(
     due: PaymentDue,
 ) -> Result<Money, CasifinError> {
     debug_assert!(nper > 0, "nper must be positive");
+    debug_assert!(
+        rate.annual_rate >= Decimal::ZERO,
+        "annual_rate must be non-negative"
+    );
 
     if nper == 0 {
         return Err(CasifinError::InvalidPeriod(0));
@@ -135,31 +199,69 @@ pub fn fv(
     let one = Decimal::ONE;
 
     if r.is_zero() {
-        let total_pmt = pmt * Decimal::from(nper);
-        return Ok(pv + total_pmt);
+        let total_pmt = (pmt * Decimal::from(nper)).inner();
+        let fv_zero = pv
+            .inner()
+            .checked_add(total_pmt)
+            .ok_or(CasifinError::ScheduleOverflow {
+                detail: "fv: zero-rate overflow".to_string(),
+            })?;
+        return Ok(Money::from_decimal(
+            fv_zero
+                .checked_mul(Decimal::NEGATIVE_ONE)
+                .ok_or(CasifinError::ScheduleOverflow {
+                    detail: "negation overflow".to_string(),
+                })?,
+        ));
     }
 
-    let base = one + r;
+    let base = one.checked_add(r).ok_or(CasifinError::ScheduleOverflow {
+        detail: "fv: base overflow".to_string(),
+    })?;
     let power = base
         .checked_powi(nper as i64)
         .ok_or(CasifinError::ScheduleOverflow {
             detail: "fv: power calculation overflow".to_string(),
         })?;
 
-    let fv_factor = (power - one)
+    let power_minus_one = power
+        .checked_sub(one)
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "fv: subtraction overflow".to_string(),
+        })?;
+    let fv_factor = power_minus_one
         .checked_div(r)
         .ok_or(CasifinError::DivisionByZero {
             operation: "fv factor",
         })?;
 
-    let fv_pmt = match due {
-        PaymentDue::End => pmt * fv_factor,
-        PaymentDue::Beginning => pmt * fv_factor * base,
+    let due_mult = match due {
+        PaymentDue::End => Decimal::ONE,
+        PaymentDue::Beginning => base,
     };
 
-    let fv_pv = pv * power;
+    let fv_pmt = pmt
+        .inner()
+        .checked_mul(fv_factor)
+        .and_then(|v| v.checked_mul(due_mult))
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "fv: payment term overflow".to_string(),
+        })?;
 
-    Ok(fv_pmt + fv_pv)
+    let fv_pv = pv
+        .inner()
+        .checked_mul(power)
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "fv: pv growth overflow".to_string(),
+        })?;
+
+    let result = fv_pmt
+        .checked_add(fv_pv)
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "fv: result overflow".to_string(),
+        })?;
+
+    Ok(Money::from_decimal(result))
 }
 
 // ============================================================================
@@ -172,14 +274,15 @@ pub fn fv(
 /// ```text
 /// If rate == 0: PMT = -(PV + FV) / nper
 /// If due == End:  PMT = -(PV*r + FV*r/((1+r)^n - 1)) / (1 - (1+r)^-n)
+/// If due == Beginning: PMT = PMT_end / (1 + r)
 /// ```
 ///
 /// # Arguments
-/// * `rate` - The interest rate per period
-/// * `nper` - The total number of payment periods
-/// * `pv` - The present value (loan amount or investment)
-/// * `fv` - The future value (desired balance after last payment)
-/// * `due` - Whether payments are due at beginning or end of period
+/// * `rate` - The interest rate per period.
+/// * `nper` - The total number of payment periods.
+/// * `pv` - The present value (loan amount or investment).
+/// * `fv` - The future value (desired balance after last payment).
+/// * `due` - Whether payments are due at beginning or end of period.
 ///
 /// # Returns
 /// `Ok(Money)` containing the payment amount, or `Err(CasifinError)` on invalid input.
@@ -194,6 +297,10 @@ pub fn pmt(
     due: PaymentDue,
 ) -> Result<Money, CasifinError> {
     debug_assert!(nper > 0, "nper must be positive");
+    debug_assert!(
+        rate.annual_rate >= Decimal::ZERO,
+        "annual_rate must be non-negative"
+    );
 
     if nper == 0 {
         return Err(CasifinError::InvalidPeriod(0));
@@ -203,15 +310,30 @@ pub fn pmt(
     let one = Decimal::ONE;
 
     if r.is_zero() {
-        let total = -(pv + fv);
-        return total.checked_div_decimal(Decimal::from(nper)).ok_or(
-            CasifinError::DivisionByZero {
-                operation: "pmt zero rate",
-            },
-        );
+        let total = pv
+            .inner()
+            .checked_add(fv.inner())
+            .ok_or(CasifinError::ScheduleOverflow {
+                detail: "pmt: zero-rate overflow".to_string(),
+            })?;
+        let pmt_zero =
+            total
+                .checked_div(Decimal::from(nper))
+                .ok_or(CasifinError::DivisionByZero {
+                    operation: "pmt zero rate",
+                })?;
+        return Ok(Money::from_decimal(
+            pmt_zero
+                .checked_mul(Decimal::NEGATIVE_ONE)
+                .ok_or(CasifinError::ScheduleOverflow {
+                    detail: "negation overflow".to_string(),
+                })?,
+        ));
     }
 
-    let base = one + r;
+    let base = one.checked_add(r).ok_or(CasifinError::ScheduleOverflow {
+        detail: "pmt: base overflow".to_string(),
+    })?;
     let power = base
         .checked_powi(nper as i64)
         .ok_or(CasifinError::ScheduleOverflow {
@@ -222,23 +344,45 @@ pub fn pmt(
         operation: "pmt neg_power",
     })?;
 
-    let denominator = one - neg_power;
+    let denominator = one
+        .checked_sub(neg_power)
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "pmt: denominator overflow".to_string(),
+        })?;
 
-    // PMT = -(PV*r + FV*r/((1+r)^n - 1)) / (1 - (1+r)^-n)
-    let power_minus_one = power - one;
-    let fv_term = fv.inner()
-        * r.checked_div(power_minus_one)
-            .ok_or(CasifinError::DivisionByZero {
-                operation: "pmt fv_term",
-            })?;
-    let pmt_ordinary = -(pv.inner() * r + fv_term);
+    let power_minus_one = power
+        .checked_sub(one)
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "pmt: power_minus_one overflow".to_string(),
+        })?;
+    let fv_rate = fv
+        .inner()
+        .checked_mul(r)
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "pmt: fv_rate overflow".to_string(),
+        })?;
+    let fv_term = fv_rate
+        .checked_div(power_minus_one)
+        .ok_or(CasifinError::DivisionByZero {
+            operation: "pmt fv_term",
+        })?;
 
-    let pmt_ordinary =
-        pmt_ordinary
-            .checked_div(denominator)
-            .ok_or(CasifinError::DivisionByZero {
-                operation: "pmt denominator",
-            })?;
+    let pv_rate = pv
+        .inner()
+        .checked_mul(r)
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "pmt: pv_rate overflow".to_string(),
+        })?;
+    let numerator = pv_rate
+        .checked_add(fv_term)
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "pmt: numerator overflow".to_string(),
+        })?;
+    let pmt_ordinary = numerator
+        .checked_div(denominator)
+        .ok_or(CasifinError::DivisionByZero {
+            operation: "pmt denominator",
+        })?;
 
     let pmt_value = match due {
         PaymentDue::End => pmt_ordinary,
@@ -251,7 +395,13 @@ pub fn pmt(
         }
     };
 
-    Ok(Money::from_decimal(pmt_value))
+    Ok(Money::from_decimal(
+        pmt_value
+            .checked_mul(Decimal::NEGATIVE_ONE)
+            .ok_or(CasifinError::ScheduleOverflow {
+                detail: "negation overflow".to_string(),
+            })?,
+    ))
 }
 
 // ============================================================================
@@ -263,15 +413,16 @@ pub fn pmt(
 /// # Formula
 /// ```text
 /// If rate == 0: nper = -(PV + FV) / PMT
-/// Else: nper = ln((PMT - FV*r) / (PMT + PV*r)) / ln(1+r)
+/// Else:
+///   nper = ln((PMT*(1+r*due) - FV*r) / (PMT*(1+r*due) + PV*r)) / ln(1+r)
 /// ```
 ///
 /// # Arguments
-/// * `rate` - The interest rate per period
-/// * `pmt` - The payment made each period
-/// * `pv` - The present value
-/// * `fv` - The future value
-/// * `due` - Whether payments are due at beginning or end of period
+/// * `rate` - The interest rate per period.
+/// * `pmt` - The payment made each period.
+/// * `pv` - The present value.
+/// * `fv` - The future value.
+/// * `due` - Whether payments are due at beginning or end of period.
 ///
 /// # Returns
 /// `Ok(Decimal)` containing the number of periods, or `Err(CasifinError)` on invalid input.
@@ -283,9 +434,13 @@ pub fn nper(
     pmt: Money,
     pv: Money,
     fv: Money,
-    _due: PaymentDue,
+    due: PaymentDue,
 ) -> Result<Decimal, CasifinError> {
     debug_assert!(!pmt.is_zero(), "pmt must be non-zero");
+    debug_assert!(
+        rate.annual_rate >= Decimal::ZERO,
+        "annual_rate must be non-negative"
+    );
 
     if pmt.is_zero() {
         return Err(CasifinError::InvalidAmount(pmt));
@@ -295,21 +450,64 @@ pub fn nper(
     let one = Decimal::ONE;
 
     if r.is_zero() {
-        let total = -(pv + fv);
-        return total
+        let total = pv
             .inner()
+            .checked_add(fv.inner())
+            .ok_or(CasifinError::ScheduleOverflow {
+                detail: "nper: zero-rate overflow".to_string(),
+            })?;
+        let periods = total
             .checked_div(pmt.inner())
             .ok_or(CasifinError::DivisionByZero {
                 operation: "nper zero rate",
+            })?;
+        return periods
+            .checked_mul(Decimal::NEGATIVE_ONE)
+            .ok_or(CasifinError::ScheduleOverflow {
+                detail: "nper: negation overflow".to_string(),
             });
     }
 
-    // nper = ln((PMT - FV*r) / (PMT + PV*r)) / ln(1+r)
-    let fv_r = fv.inner() * r;
-    let pv_r = pv.inner() * r;
+    let due_mult = one
+        .checked_add(
+            r.checked_mul(due_flag(due))
+                .ok_or(CasifinError::ScheduleOverflow {
+                    detail: "nper: due flag overflow".to_string(),
+                })?,
+        )
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "nper: due_mult overflow".to_string(),
+        })?;
 
-    let numerator = pmt.inner() - fv_r;
-    let denominator = pmt.inner() + pv_r;
+    let pmt_due = pmt
+        .inner()
+        .checked_mul(due_mult)
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "nper: pmt_due overflow".to_string(),
+        })?;
+    let fv_r = fv
+        .inner()
+        .checked_mul(r)
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "nper: fv_r overflow".to_string(),
+        })?;
+    let pv_r = pv
+        .inner()
+        .checked_mul(r)
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "nper: pv_r overflow".to_string(),
+        })?;
+
+    let numerator = pmt_due
+        .checked_sub(fv_r)
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "nper: numerator overflow".to_string(),
+        })?;
+    let denominator = pmt_due
+        .checked_add(pv_r)
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "nper: denominator overflow".to_string(),
+        })?;
 
     let ratio = numerator
         .checked_div(denominator)
@@ -318,13 +516,16 @@ pub fn nper(
         })?;
 
     if ratio <= Decimal::ZERO {
-        return Err(CasifinError::ScheduleOverflow {
-            detail: "nper: invalid ratio - loan cannot be paid off".to_string(),
+        return Err(CasifinError::InvalidInput {
+            reason: "nper: ratio must be positive; loan cannot be paid off".to_string(),
         });
     }
 
     let ln_ratio = ratio.ln();
-    let ln_base = (one + r).ln();
+    let base = one.checked_add(r).ok_or(CasifinError::ScheduleOverflow {
+        detail: "nper: base overflow".to_string(),
+    })?;
+    let ln_base = base.ln();
 
     if ln_base.is_zero() {
         return Err(CasifinError::DivisionByZero {
@@ -332,7 +533,11 @@ pub fn nper(
         });
     }
 
-    Ok(ln_ratio / ln_base)
+    ln_ratio
+        .checked_div(ln_base)
+        .ok_or(CasifinError::DivisionByZero {
+            operation: "nper ln division",
+        })
 }
 
 // ============================================================================
@@ -350,13 +555,13 @@ pub fn nper(
 /// where due = 0 for End, due = 1 for Beginning.
 ///
 /// # Arguments
-/// * `nper` - The total number of payment periods
-/// * `pmt` - The payment made each period
-/// * `pv` - The present value
-/// * `fv` - The future value
-/// * `due` - Whether payments are due at beginning or end of period
-/// * `guess` - Initial guess for the rate (defaults to Config::guess if None)
-/// * `config` - Solver configuration (eps, max_iterations)
+/// * `nper` - The total number of payment periods.
+/// * `pmt` - The payment made each period.
+/// * `pv` - The present value.
+/// * `fv` - The future value.
+/// * `due` - Whether payments are due at beginning or end of period.
+/// * `guess` - Initial guess for the rate (defaults to Config::guess if None).
+/// * `config` - Solver configuration (eps, max_iterations).
 ///
 /// # Returns
 /// `Ok(Decimal)` containing the rate per period, or `Err(CasifinError::IrrConvergenceFailure)`
@@ -375,40 +580,40 @@ pub fn rate(
     config: Config,
 ) -> Result<Decimal, CasifinError> {
     debug_assert!(nper > 0, "nper must be positive");
+    debug_assert!(config.eps > Decimal::ZERO, "eps must be positive");
+    debug_assert!(config.max_iterations > 0, "max_iterations must be positive");
 
     if nper == 0 {
         return Err(CasifinError::InvalidPeriod(0));
     }
 
+    let df = due_flag(due);
     let mut rate_val = guess.unwrap_or(config.guess);
-    let due_flag = match due {
-        PaymentDue::End => Decimal::ZERO,
-        PaymentDue::Beginning => Decimal::ONE,
-    };
 
     for _ in 0..config.max_iterations {
-        let (f, df) = rate_eq_and_derivative(nper, pmt, pv, fv, rate_val, due_flag)?;
+        let (f, f_prime) = rate_equation_and_derivative(nper, pmt, pv, fv, rate_val, df)?;
 
         if f.abs() < config.eps {
             return Ok(rate_val);
         }
 
-        if df.abs() < config.eps {
-            return rate_bisection(nper, pmt, pv, fv, due_flag, config.eps);
+        if f_prime.abs() < config.eps {
+            return rate_bisection(nper, pmt, pv, fv, df, config);
         }
 
-        let new_rate = rate_val - f / df;
+        let step = f.checked_div(f_prime).ok_or(CasifinError::DivisionByZero {
+            operation: "rate newton step",
+        })?;
+        let new_rate = rate_val
+            .checked_sub(step)
+            .ok_or(CasifinError::ScheduleOverflow {
+                detail: "rate: newton overflow".to_string(),
+            })?;
+
         if (new_rate - rate_val).abs() < config.eps {
             return Ok(new_rate);
         }
         rate_val = new_rate;
-
-        if rate_val < Decimal::NEGATIVE_ONE + Decimal::new(1, 4) {
-            rate_val = Decimal::new(-9999, 4); // -0.9999
-        }
-        if rate_val > Decimal::ONE {
-            rate_val = Decimal::ONE;
-        }
     }
 
     Err(CasifinError::IrrConvergenceFailure {
@@ -417,9 +622,17 @@ pub fn rate(
     })
 }
 
-/// Evaluates the TVM equation and its derivative at a given rate.
+/// Evaluates the TVM equation and its analytical derivative at a given rate.
+///
+/// # Formula
+/// ```text
+/// f(r)  = PV*(1+r)^n + PMT*((1+r)^n - 1)/r * (1+r*due) + FV
+/// f'(r) = PV*n*(1+r)^(n-1)
+///         + PMT * [ (n*(1+r)^(n-1)/r - ((1+r)^n - 1)/r^2) * (1+r*due)
+///                   + ((1+r)^n - 1)/r * due ]
+/// ```
 #[allow(clippy::too_many_arguments)]
-fn rate_eq_and_derivative(
+fn rate_equation_and_derivative(
     nper: u32,
     pmt: Money,
     pv: Money,
@@ -428,56 +641,131 @@ fn rate_eq_and_derivative(
     due_flag: Decimal,
 ) -> Result<(Decimal, Decimal), CasifinError> {
     let one = Decimal::ONE;
-    let base = one + r;
+    let n = Decimal::from(nper);
+
+    let base = one.checked_add(r).ok_or(CasifinError::ScheduleOverflow {
+        detail: "rate: base overflow".to_string(),
+    })?;
 
     let power = base
         .checked_powi(nper as i64)
         .ok_or(CasifinError::ScheduleOverflow {
             detail: "rate: power overflow".to_string(),
         })?;
-
-    // f(r) = PV*(1+r)^n + PMT*((1+r)^n - 1)/r * (1+r*due) + FV
-    let annuity_factor = if r.is_zero() {
-        Decimal::from(nper)
+    let power_prev = if nper == 1 {
+        one
     } else {
-        (power - one)
+        base.checked_powi((nper - 1) as i64)
+            .ok_or(CasifinError::ScheduleOverflow {
+                detail: "rate: power_prev overflow".to_string(),
+            })?
+    };
+
+    // Annuity factor A = ((1+r)^n - 1) / r, with limit n when r -> 0.
+    let (annuity_factor, annuity_derivative) = if r.is_zero() {
+        let a = n;
+        let da =
+            n.checked_mul(n.checked_sub(one).ok_or(CasifinError::ScheduleOverflow {
+                detail: "rate: n-1 overflow".to_string(),
+            })?)
+            .ok_or(CasifinError::ScheduleOverflow {
+                detail: "rate: annuity derivative overflow".to_string(),
+            })? / Decimal::from(2);
+        (a, da)
+    } else {
+        let power_minus_one = power
+            .checked_sub(one)
+            .ok_or(CasifinError::ScheduleOverflow {
+                detail: "rate: power_minus_one overflow".to_string(),
+            })?;
+        let a = power_minus_one
             .checked_div(r)
             .ok_or(CasifinError::DivisionByZero {
                 operation: "rate annuity factor",
-            })?
-    };
-
-    let due_factor = one + r * due_flag;
-    let f = pv.inner() * power + pmt.inner() * annuity_factor * due_factor + fv.inner();
-
-    // Derivative approximation
-    let h = Decimal::new(1, 8); // 1e-8
-    let r_plus = r + h;
-    let base_plus = one + r_plus;
-    let power_plus = base_plus
-        .checked_powi(nper as i64)
-        .ok_or(CasifinError::ScheduleOverflow {
-            detail: "rate: derivative power overflow".to_string(),
-        })?;
-    let annuity_plus = if r_plus.is_zero() {
-        Decimal::from(nper)
-    } else {
-        (power_plus - one)
-            .checked_div(r_plus)
+            })?;
+        let da = n
+            .checked_mul(power_prev)
+            .and_then(|v| v.checked_sub(a))
+            .and_then(|v| v.checked_div(r))
             .ok_or(CasifinError::DivisionByZero {
-                operation: "rate derivative annuity",
-            })?
+                operation: "rate annuity derivative",
+            })?;
+        (a, da)
     };
-    let due_plus = one + r_plus * due_flag;
-    let f_plus = pv.inner() * power_plus + pmt.inner() * annuity_plus * due_plus + fv.inner();
 
-    let df = (f_plus - f)
-        .checked_div(h)
-        .ok_or(CasifinError::DivisionByZero {
-            operation: "rate derivative",
+    let due_factor = one
+        .checked_add(
+            r.checked_mul(due_flag)
+                .ok_or(CasifinError::ScheduleOverflow {
+                    detail: "rate: due flag overflow".to_string(),
+                })?,
+        )
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "rate: due_factor overflow".to_string(),
         })?;
 
-    Ok((f, df))
+    // f(r) = PV*power + PMT*annuity_factor*due_factor + FV
+    let pv_term = pv
+        .inner()
+        .checked_mul(power)
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "rate: pv_term overflow".to_string(),
+        })?;
+    let pmt_term = pmt
+        .inner()
+        .checked_mul(annuity_factor)
+        .and_then(|v| v.checked_mul(due_factor))
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "rate: pmt_term overflow".to_string(),
+        })?;
+    let f = pv_term
+        .checked_add(pmt_term)
+        .and_then(|v| v.checked_add(fv.inner()))
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "rate: f overflow".to_string(),
+        })?;
+
+    // f'(r) = PV*n*power_prev
+    //         + PMT * (da * due_factor + a * due_flag)
+    let pv_derivative = pv
+        .inner()
+        .checked_mul(n)
+        .and_then(|v| v.checked_mul(power_prev))
+        .ok_or(CasifinError::ScheduleOverflow {
+            detail: "rate: pv_derivative overflow".to_string(),
+        })?;
+    let pmt_derivative_a =
+        annuity_derivative
+            .checked_mul(due_factor)
+            .ok_or(CasifinError::ScheduleOverflow {
+                detail: "rate: pmt_derivative_a overflow".to_string(),
+            })?;
+    let pmt_derivative_b =
+        annuity_factor
+            .checked_mul(due_flag)
+            .ok_or(CasifinError::ScheduleOverflow {
+                detail: "rate: pmt_derivative_b overflow".to_string(),
+            })?;
+    let pmt_derivative =
+        pmt_derivative_a
+            .checked_add(pmt_derivative_b)
+            .ok_or(CasifinError::ScheduleOverflow {
+                detail: "rate: pmt_derivative overflow".to_string(),
+            })?;
+    let pmt_derivative_total =
+        pmt.inner()
+            .checked_mul(pmt_derivative)
+            .ok_or(CasifinError::ScheduleOverflow {
+                detail: "rate: pmt_derivative_total overflow".to_string(),
+            })?;
+    let f_prime =
+        pv_derivative
+            .checked_add(pmt_derivative_total)
+            .ok_or(CasifinError::ScheduleOverflow {
+                detail: "rate: f_prime overflow".to_string(),
+            })?;
+
+    Ok((f, f_prime))
 }
 
 /// Bisection solver for rate when Newton-Raphson fails.
@@ -488,20 +776,20 @@ fn rate_bisection(
     pv: Money,
     fv: Money,
     due_flag: Decimal,
-    eps: Decimal,
+    config: Config,
 ) -> Result<Decimal, CasifinError> {
     let mut low = Decimal::new(-9999, 4); // -0.9999
     let mut high = Decimal::ONE;
     let mut mid = (low + high) / Decimal::from(2);
 
-    for _ in 0..1000 {
-        let f_mid = tvm_eq(nper, pmt, pv, fv, mid, due_flag);
+    for _ in 0..config.max_iterations {
+        let f_mid = tvm_equation(nper, pmt, pv, fv, mid, due_flag);
 
-        if f_mid.abs() < eps {
+        if f_mid.abs() < config.eps {
             return Ok(mid);
         }
 
-        let f_low = tvm_eq(nper, pmt, pv, fv, low, due_flag);
+        let f_low = tvm_equation(nper, pmt, pv, fv, low, due_flag);
 
         if f_low * f_mid < Decimal::ZERO {
             high = mid;
@@ -510,23 +798,33 @@ fn rate_bisection(
         }
 
         let new_mid = (low + high) / Decimal::from(2);
-        if (new_mid - mid).abs() < eps {
+        if (new_mid - mid).abs() < config.eps {
             return Ok(new_mid);
         }
         mid = new_mid;
     }
 
     Err(CasifinError::IrrConvergenceFailure {
-        max_iter: 1000,
-        eps,
+        max_iter: config.max_iterations,
+        eps: config.eps,
     })
 }
 
 /// Evaluates the TVM equation: f(r) = PV*(1+r)^n + PMT*((1+r)^n - 1)/r * (1+r*due) + FV
 #[allow(clippy::too_many_arguments)]
-fn tvm_eq(nper: u32, pmt: Money, pv: Money, fv: Money, r: Decimal, due_flag: Decimal) -> Decimal {
+fn tvm_equation(
+    nper: u32,
+    pmt: Money,
+    pv: Money,
+    fv: Money,
+    r: Decimal,
+    due_flag: Decimal,
+) -> Decimal {
     let one = Decimal::ONE;
-    let base = one + r;
+    let base = match one.checked_add(r) {
+        Some(b) => b,
+        None => return Decimal::ZERO,
+    };
 
     let power = match base.checked_powi(nper as i64) {
         Some(p) => p,
@@ -536,14 +834,31 @@ fn tvm_eq(nper: u32, pmt: Money, pv: Money, fv: Money, r: Decimal, due_flag: Dec
     let annuity_factor = if r.is_zero() {
         Decimal::from(nper)
     } else {
-        match (power - one).checked_div(r) {
+        match power.checked_sub(one).and_then(|v| v.checked_div(r)) {
             Some(af) => af,
             None => return Decimal::ZERO,
         }
     };
 
-    let due_factor = one + r * due_flag;
-    pv.inner() * power + pmt.inner() * annuity_factor * due_factor + fv.inner()
+    let due_factor = match one.checked_add(r.checked_mul(due_flag).unwrap_or(Decimal::ZERO)) {
+        Some(df) => df,
+        None => return Decimal::ZERO,
+    };
+
+    match pv
+        .inner()
+        .checked_mul(power)
+        .and_then(|v| {
+            pmt.inner()
+                .checked_mul(annuity_factor)
+                .and_then(|w| w.checked_mul(due_factor))
+                .map(|w| v + w)
+        })
+        .and_then(|v| v.checked_add(fv.inner()))
+    {
+        Some(result) => result,
+        None => Decimal::ZERO,
+    }
 }
 
 // ============================================================================
@@ -558,8 +873,8 @@ fn tvm_eq(nper: u32, pmt: Money, pv: Money, fv: Money, r: Decimal, due_flag: Dec
 /// ```
 ///
 /// # Arguments
-/// * `rate` - The discount rate (must be positive)
-/// * `pmt` - The periodic payment
+/// * `rate` - The discount rate (must be positive).
+/// * `pmt` - The periodic payment.
 ///
 /// # Returns
 /// `Ok(Money)` containing the present value, or `Err(CasifinError)` if rate is zero.
@@ -567,9 +882,14 @@ fn tvm_eq(nper: u32, pmt: Money, pv: Money, fv: Money, r: Decimal, due_flag: Dec
 /// # Panics
 /// This function does not panic.
 pub fn pv_perpetuity(rate: Rate, pmt: Money) -> Result<Money, CasifinError> {
+    debug_assert!(
+        rate.annual_rate >= Decimal::ZERO,
+        "annual_rate must be non-negative"
+    );
+
     let r = rate.periodic_rate()?;
 
-    debug_assert!(r > Decimal::ZERO, "rate must be positive for perpetuity");
+    debug_assert!(r >= Decimal::ZERO, "periodic rate must be non-negative");
 
     if r.is_zero() {
         return Err(CasifinError::InvalidRate(r));
@@ -593,8 +913,8 @@ pub fn pv_perpetuity(rate: Rate, pmt: Money) -> Result<Money, CasifinError> {
 /// ```
 ///
 /// # Arguments
-/// * `rate` - The interest rate per period
-/// * `flows` - A slice of cash flows (indexed by period)
+/// * `rate` - The interest rate per period.
+/// * `flows` - A slice of cash flows (indexed by period).
 ///
 /// # Returns
 /// `Ok(Money)` containing the future value, or `Err(CasifinError)` on invalid input.
@@ -603,23 +923,46 @@ pub fn pv_perpetuity(rate: Rate, pmt: Money) -> Result<Money, CasifinError> {
 /// This function does not panic.
 pub fn fv_uneven_cashflows(rate: Rate, flows: &[Money]) -> Result<Money, CasifinError> {
     debug_assert!(!flows.is_empty(), "flows must not be empty");
+    debug_assert!(
+        rate.annual_rate >= Decimal::ZERO,
+        "annual_rate must be non-negative"
+    );
+
+    if flows.is_empty() {
+        return Err(CasifinError::InvalidInput {
+            reason: "fv_uneven_cashflows: flows must not be empty".to_string(),
+        });
+    }
 
     let r = rate.periodic_rate()?;
     let n = flows.len();
     let one = Decimal::ONE;
-    let mut fv = Money::ZERO;
+    let mut total = Decimal::ZERO;
 
     for (t, &cf) in flows.iter().enumerate() {
         let periods_remaining = n - t;
-        let factor = (one + r).checked_powi(periods_remaining as i64).ok_or(
-            CasifinError::ScheduleOverflow {
-                detail: "fv_uneven_cashflows: power overflow".to_string(),
-            },
-        )?;
-        fv = fv + cf * factor;
+        let base = one.checked_add(r).ok_or(CasifinError::ScheduleOverflow {
+            detail: "fv_uneven_cashflows: base overflow".to_string(),
+        })?;
+        let factor =
+            base.checked_powi(periods_remaining as i64)
+                .ok_or(CasifinError::ScheduleOverflow {
+                    detail: "fv_uneven_cashflows: power overflow".to_string(),
+                })?;
+        let contribution =
+            cf.inner()
+                .checked_mul(factor)
+                .ok_or(CasifinError::ScheduleOverflow {
+                    detail: "fv_uneven_cashflows: contribution overflow".to_string(),
+                })?;
+        total = total
+            .checked_add(contribution)
+            .ok_or(CasifinError::ScheduleOverflow {
+                detail: "fv_uneven_cashflows: total overflow".to_string(),
+            })?;
     }
 
-    Ok(fv)
+    Ok(Money::from_decimal(total))
 }
 
 // ============================================================================
@@ -650,7 +993,7 @@ mod tests {
 
     #[test]
     fn pv_annuity_end() {
-        // PV of $1000/year for 5 years at 5% = $4,329.48
+        // PV of $1000/year for 5 years at 5% = $4,329.476671...
         let rate = make_rate(5, 1);
         let result = pv(
             rate,
@@ -660,13 +1003,13 @@ mod tests {
             PaymentDue::End,
         )
         .unwrap();
-        let expected = Decimal::new(432948, 2); // 4329.48
-        assert_near(result.inner(), expected, Decimal::new(1, 1));
+        let expected = Decimal::new(4329476671_i64, 6); // 4329.476671
+        assert_near(result.inner(), expected, Decimal::new(1, 6));
     }
 
     #[test]
     fn pv_annuity_begin() {
-        // PV of $1000/year for 5 years at 5%, beginning = $4,545.95
+        // PV of $1000/year for 5 years at 5%, beginning = $4,545.950504...
         let rate = make_rate(5, 1);
         let result = pv(
             rate,
@@ -676,13 +1019,13 @@ mod tests {
             PaymentDue::Beginning,
         )
         .unwrap();
-        let expected = Decimal::new(454595, 2); // 4545.95
-        assert_near(result.inner(), expected, Decimal::new(1, 1));
+        let expected = Decimal::new(4545950504_i64, 6); // 4545.950504
+        assert_near(result.inner(), expected, Decimal::new(1, 6));
     }
 
     #[test]
     fn fv_annuity_end() {
-        // FV of $1000/year for 5 years at 5% = $5,525.63
+        // FV of $1000/year for 5 years at 5% = $5,525.631250
         let rate = make_rate(5, 1);
         let result = fv(
             rate,
@@ -692,14 +1035,13 @@ mod tests {
             PaymentDue::End,
         )
         .unwrap();
-        let expected = Decimal::new(552563, 2); // 5525.63
-        assert_near(result.inner(), expected, Decimal::new(1, 1));
+        let expected = Decimal::new(5525631250_i64, 6); // 5525.631250
+        assert_near(result.inner(), expected, Decimal::new(1, 6));
     }
 
     #[test]
     fn pmt_mortgage() {
-        // PMT on $300,000 at 4.25% for 30 years (360 months) = -$1,475.82
-        // (negative because it is an outflow from borrower's perspective)
+        // PMT on $300,000 at 4.25% for 30 years (360 months) ≈ -$1,475.82
         let rate = Rate::new(Decimal::new(425, 4), Compounding::Discrete(12)).unwrap();
         let result = pmt(
             rate,
@@ -709,14 +1051,13 @@ mod tests {
             PaymentDue::End,
         )
         .unwrap();
-        let expected = Decimal::new(147582, 2); // 1475.82
-        assert_near(result.inner().abs(), expected, Decimal::new(1, 1));
+        let expected = Decimal::new(1475817865_i64, 6); // 1475.817865 (Excel reference)
+        assert_near(result.inner().abs(), expected, Decimal::new(1, 2));
     }
 
     #[test]
     fn nper_loan() {
         // NPER to pay off $10,000 at $200/month, 0% = 50 periods
-        // PMT is negative (outflow), PV is positive (loan received).
         let rate = Rate::new(Decimal::ZERO, Compounding::Discrete(12)).unwrap();
         let result = nper(
             rate,
@@ -731,7 +1072,7 @@ mod tests {
 
     #[test]
     fn rate_savings() {
-        // RATE to grow $1000 to $2000 with $0 PMT over 10 years = 7.18%
+        // RATE to grow $1000 to $2000 with $0 PMT over 10 years = 7.177346%
         let config = Config::default();
         let result = rate(
             10,
@@ -743,9 +1084,8 @@ mod tests {
             config,
         )
         .unwrap();
-        // Should be approximately 7.18%
-        assert!(result > Decimal::new(7, 2)); // > 0.07
-        assert!(result < Decimal::new(8, 2)); // < 0.08
+        let expected = Decimal::new(7177346, 8); // 0.07177346
+        assert_near(result, expected, Decimal::new(1, 6));
     }
 
     #[test]
@@ -758,20 +1098,23 @@ mod tests {
 
     #[test]
     fn rate_convergence_failure() {
-        // Pathological inputs that should not converge
+        // Tight epsilon and one iteration forces convergence failure.
         let config = Config::builder()
-            .max_iterations(10)
+            .max_iterations(1)
             .eps(Decimal::new(1, 15))
             .build();
         let result = rate(
-            1000,
-            Money::from_decimal(Decimal::new(1, 0)),
-            Money::from_decimal(Decimal::new(1, 0)),
-            Money::from_decimal(Decimal::new(1000000, 0)),
+            10,
+            Money::from_decimal(Decimal::new(-100, 0)),
+            Money::from_decimal(Decimal::new(1000, 0)),
+            Money::from_decimal(Decimal::new(2000, 0)),
             PaymentDue::End,
-            Some(Decimal::new(5, 1)),
+            Some(Decimal::new(1, 1)),
             config,
         );
-        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(CasifinError::IrrConvergenceFailure { .. })
+        ));
     }
 }

@@ -8,7 +8,7 @@ use rust_decimal::Decimal;
 fn main() -> Result<(), CasifinError> {
     println!("=== Investment Analysis ===\n");
 
-    let casifin = Casifin::with_default_config();
+    let casifin = Casifin::with_defaults();
 
     // Real estate investment scenario
     println!("Property Investment Analysis:");

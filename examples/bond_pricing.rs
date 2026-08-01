@@ -8,7 +8,7 @@ use rust_decimal::Decimal;
 fn main() -> Result<(), CasifinError> {
     println!("=== Bond Pricing ===\n");
 
-    let casifin = Casifin::with_default_config();
+    let casifin = Casifin::with_defaults();
 
     // Bond parameters
     let face_value = Money::from(1000);

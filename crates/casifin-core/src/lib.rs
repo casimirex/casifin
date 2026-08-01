@@ -35,9 +35,17 @@ impl Money {
 
     /// Creates a new `Money` value from dollars and cents.
     ///
+    /// # Formula
+    /// ```text
+    /// value = (dollars * 100 + cents) / 100
+    /// ```
+    ///
     /// # Arguments
-    /// * `dollars` - The dollar amount
-    /// * `cents` - The cents amount (0-99)
+    /// * `dollars` - The dollar amount.
+    /// * `cents` - The cents amount (0-99).
+    ///
+    /// # Returns
+    /// `Ok(Money)` on success, or `Err(CasifinError::InvalidInput)` if cents >= 100.
     ///
     /// # Example
     /// ```
@@ -50,11 +58,34 @@ impl Money {
     /// This function does not panic.
     pub fn new(dollars: i64, cents: u32) -> Result<Self, CasifinError> {
         debug_assert!(cents < 100, "cents must be less than 100");
+        debug_assert!(
+            dollars.checked_mul(100).is_some(),
+            "dollars multiplication must not overflow"
+        );
+        if cents >= 100 {
+            return Err(CasifinError::InvalidInput {
+                reason: format!("cents must be 0-99, got {cents}"),
+            });
+        }
         let dec = Decimal::new(dollars * 100 + i64::from(cents), 2);
         Ok(Money(dec))
     }
 
     /// Creates a `Money` value from a `Decimal`.
+    ///
+    /// # Arguments
+    /// * `dec` - The exact decimal value to store.
+    ///
+    /// # Returns
+    /// A new `Money` instance.
+    ///
+    /// # Example
+    /// ```
+    /// use casifin_core::Money;
+    /// use rust_decimal::Decimal;
+    /// let m = Money::from_decimal(Decimal::new(123450, 3));
+    /// assert_eq!(m.to_string(), "123.45");
+    /// ```
     ///
     /// # Panics
     /// This function does not panic.
@@ -65,7 +96,10 @@ impl Money {
     /// Parses a `Money` value from a string.
     ///
     /// # Arguments
-    /// * `s` - A string representation of a decimal number (e.g., "1234.56")
+    /// * `s` - A string representation of a decimal number (e.g., "1234.56").
+    ///
+    /// # Returns
+    /// `Ok(Money)` on success, or `Err(CasifinError::ParseError)` on failure.
     ///
     /// # Example
     /// ```
@@ -78,11 +112,15 @@ impl Money {
     /// This function does not panic.
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Result<Self, CasifinError> {
+        debug_assert!(!s.is_empty(), "input string must not be empty");
         let dec = Decimal::from_str(s).map_err(|e| CasifinError::ParseError(format!("{e}")))?;
         Ok(Money(dec))
     }
 
     /// Returns the inner `Decimal` value.
+    ///
+    /// # Returns
+    /// The wrapped `Decimal` amount.
     ///
     /// # Panics
     /// This function does not panic.
@@ -91,6 +129,9 @@ impl Money {
     }
 
     /// Returns the absolute value.
+    ///
+    /// # Returns
+    /// A new `Money` containing `|self|`.
     ///
     /// # Panics
     /// This function does not panic.
@@ -124,17 +165,27 @@ impl Money {
 
     /// Rounds to 2 decimal places using standard rounding.
     ///
+    /// # Returns
+    /// A new `Money` rounded to cents.
+    ///
     /// # Panics
     /// This function does not panic.
     pub fn round_to_cents(&self) -> Self {
         Money(self.0.round_dp(2))
     }
 
-    /// Checked division by a `Decimal`. Returns `None` on division by zero.
+    /// Checked division by a `Decimal`.
+    ///
+    /// # Arguments
+    /// * `other` - The divisor.
+    ///
+    /// # Returns
+    /// `Some(Money)` on success, or `None` if `other` is zero.
     ///
     /// # Panics
     /// This function does not panic.
     pub fn checked_div_decimal(&self, other: Decimal) -> Option<Self> {
+        debug_assert!(!other.is_zero(), "divisor must not be zero");
         self.0.checked_div(other).map(Money)
     }
 }
@@ -282,8 +333,12 @@ impl Rate {
     /// Creates a new `Rate` with the given annual rate and compounding frequency.
     ///
     /// # Arguments
-    /// * `annual_rate` - The annual interest rate (must be non-negative)
-    /// * `compounding` - The compounding frequency
+    /// * `annual_rate` - The annual interest rate (must be non-negative).
+    /// * `compounding` - The compounding frequency.
+    ///
+    /// # Returns
+    /// `Ok(Rate)` on success, or `Err(CasifinError)` if the rate is negative
+    /// or the discrete compounding frequency is zero.
     ///
     /// # Example
     /// ```
@@ -304,11 +359,13 @@ impl Rate {
                 return Err(CasifinError::InvalidCompounding);
             }
         }
-
         debug_assert!(
             annual_rate >= Decimal::ZERO,
             "annual_rate must be non-negative"
         );
+        if let Compounding::Discrete(n) = compounding {
+            debug_assert!(n > 0, "discrete compounding must have n > 0");
+        }
         Ok(Rate {
             annual_rate,
             compounding,
@@ -318,6 +375,12 @@ impl Rate {
 
     /// Sets the day count convention.
     ///
+    /// # Arguments
+    /// * `convention` - The day count convention to use.
+    ///
+    /// # Returns
+    /// The same `Rate` with the updated convention.
+    ///
     /// # Panics
     /// This function does not panic.
     pub fn with_convention(mut self, convention: DayCount) -> Self {
@@ -326,6 +389,10 @@ impl Rate {
     }
 
     /// Returns the periodic rate for one compounding period.
+    ///
+    /// # Returns
+    /// `Ok(Decimal)` containing the period rate, or `Err(CasifinError::DivisionByZero)`
+    /// if the discrete compounding frequency is zero.
     ///
     /// # Example
     /// ```
@@ -385,6 +452,9 @@ impl Default for Config {
 impl Config {
     /// Creates a new `ConfigBuilder`.
     ///
+    /// # Returns
+    /// A default [`ConfigBuilder`].
+    ///
     /// # Panics
     /// This function does not panic.
     pub fn builder() -> ConfigBuilder {
@@ -417,31 +487,77 @@ impl Default for ConfigBuilder {
 
 impl ConfigBuilder {
     /// Sets the convergence epsilon.
+    ///
+    /// # Arguments
+    /// * `eps` - The desired precision.
+    ///
+    /// # Returns
+    /// The builder.
+    ///
+    /// # Panics
+    /// This function does not panic.
     pub fn eps(mut self, eps: Decimal) -> Self {
+        debug_assert!(eps > Decimal::ZERO, "eps must be positive");
         self.eps = eps;
         self
     }
 
     /// Sets the maximum number of iterations for iterative solvers.
+    ///
+    /// # Arguments
+    /// * `n` - The iteration cap.
+    ///
+    /// # Returns
+    /// The builder.
+    ///
+    /// # Panics
+    /// This function does not panic.
     pub fn max_iterations(mut self, n: u32) -> Self {
+        debug_assert!(n > 0, "max_iterations must be positive");
         self.max_iterations = n;
         self
     }
 
     /// Sets the initial guess for root-finding solvers.
+    ///
+    /// # Arguments
+    /// * `guess` - The initial guess.
+    ///
+    /// # Returns
+    /// The builder.
+    ///
+    /// # Panics
+    /// This function does not panic.
     pub fn guess(mut self, guess: Decimal) -> Self {
         self.guess = guess;
         self
     }
 
     /// Sets whether to use business days only.
+    ///
+    /// # Arguments
+    /// * `v` - Whether to restrict to business days.
+    ///
+    /// # Returns
+    /// The builder.
+    ///
+    /// # Panics
+    /// This function does not panic.
     pub fn business_days_only(mut self, v: bool) -> Self {
         self.business_days_only = v;
         self
     }
 
     /// Builds the [`Config`].
+    ///
+    /// # Returns
+    /// A fully populated [`Config`].
+    ///
+    /// # Panics
+    /// This function does not panic.
     pub fn build(self) -> Config {
+        debug_assert!(self.eps > Decimal::ZERO, "eps must be positive");
+        debug_assert!(self.max_iterations > 0, "max_iterations must be positive");
         Config {
             eps: self.eps,
             max_iterations: self.max_iterations,
