@@ -1,4 +1,2 @@
 cognitive-complexity-threshold = 10
-too-many-arguments-threshold = 7
-allow-unwrap-in-tests = true
-allow-expect-in-tests = true
+too-many-arguments-threshold = 5

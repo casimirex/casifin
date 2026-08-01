@@ -7,7 +7,7 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
 /// An inventory lot.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InventoryLot {
     /// Number of units in the lot.
     pub units: u32,
@@ -56,10 +56,12 @@ pub trait InventoryMethod {
         let total_value: Money = lots.iter().map(|l| l.total_value()).sum();
 
         if units_sold > total_units {
-            return Err(CasifinError::InventoryError(format!(
-                "units_sold ({}) exceeds available inventory ({})",
-                units_sold, total_units
-            )));
+            return Err(CasifinError::InvalidInput {
+                reason: format!(
+                    "units_sold ({}) exceeds available inventory ({})",
+                    units_sold, total_units
+                ),
+            });
         }
 
         let cogs = self.cogs(lots, units_sold)?;
@@ -83,17 +85,19 @@ pub struct Fifo;
 impl InventoryMethod for Fifo {
     fn cogs(&self, lots: &[InventoryLot], units_sold: u32) -> Result<Money, CasifinError> {
         if lots.is_empty() {
-            return Err(CasifinError::InventoryError(
-                "no inventory lots available".to_string(),
-            ));
+            return Err(CasifinError::InvalidInput {
+                reason: "no inventory lots available".to_string(),
+            });
         }
 
         let total_units: u32 = lots.iter().map(|l| l.units).sum();
         if units_sold > total_units {
-            return Err(CasifinError::InventoryError(format!(
-                "units_sold ({}) exceeds available inventory ({})",
-                units_sold, total_units
-            )));
+            return Err(CasifinError::InvalidInput {
+                reason: format!(
+                    "units_sold ({}) exceeds available inventory ({})",
+                    units_sold, total_units
+                ),
+            });
         }
 
         debug_assert!(!lots.is_empty(), "lots must not be empty");
@@ -136,17 +140,19 @@ pub struct Lifo;
 impl InventoryMethod for Lifo {
     fn cogs(&self, lots: &[InventoryLot], units_sold: u32) -> Result<Money, CasifinError> {
         if lots.is_empty() {
-            return Err(CasifinError::InventoryError(
-                "no inventory lots available".to_string(),
-            ));
+            return Err(CasifinError::InvalidInput {
+                reason: "no inventory lots available".to_string(),
+            });
         }
 
         let total_units: u32 = lots.iter().map(|l| l.units).sum();
         if units_sold > total_units {
-            return Err(CasifinError::InventoryError(format!(
-                "units_sold ({}) exceeds available inventory ({})",
-                units_sold, total_units
-            )));
+            return Err(CasifinError::InvalidInput {
+                reason: format!(
+                    "units_sold ({}) exceeds available inventory ({})",
+                    units_sold, total_units
+                ),
+            });
         }
 
         debug_assert!(!lots.is_empty(), "lots must not be empty");
@@ -189,17 +195,19 @@ pub struct WeightedAverage;
 impl InventoryMethod for WeightedAverage {
     fn cogs(&self, lots: &[InventoryLot], units_sold: u32) -> Result<Money, CasifinError> {
         if lots.is_empty() {
-            return Err(CasifinError::InventoryError(
-                "no inventory lots available".to_string(),
-            ));
+            return Err(CasifinError::InvalidInput {
+                reason: "no inventory lots available".to_string(),
+            });
         }
 
         let total_units: u32 = lots.iter().map(|l| l.units).sum();
         if units_sold > total_units {
-            return Err(CasifinError::InventoryError(format!(
-                "units_sold ({}) exceeds available inventory ({})",
-                units_sold, total_units
-            )));
+            return Err(CasifinError::InvalidInput {
+                reason: format!(
+                    "units_sold ({}) exceeds available inventory ({})",
+                    units_sold, total_units
+                ),
+            });
         }
 
         debug_assert!(!lots.is_empty(), "lots must not be empty");

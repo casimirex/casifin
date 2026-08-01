@@ -1,23 +1,22 @@
 [package]
 name = "casifin-amortization"
-description = "Amortization engines (fixed-rate and ARM) for the casifin financial computation engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-documentation.workspace = true
-keywords.workspace = true
-categories.workspace = true
 
 [dependencies]
-casifin-core = { path = "../casifin-core", version = "0.1.0" }
-casifin-tvm = { path = "../casifin-tvm", version = "0.1.0" }
+casifin-core = { path = "../casifin-core" }
+casifin-tvm = { path = "../casifin-tvm" }
 rust_decimal = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
-serde = { workspace = true }
+serde = { workspace = true, optional = true }
 
 [dev-dependencies]
-criterion = { workspace = true }
-proptest = { workspace = true }
 approx = { workspace = true }
+
+[features]
+default = ["std"]
+std = []
+serde = ["dep:serde", "casifin-core/serde"]

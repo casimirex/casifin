@@ -231,7 +231,7 @@ pub mod returns {
     /// ```
     pub fn geometric_mean_return(returns: &[Decimal]) -> Result<Decimal, CasifinError> {
         if returns.is_empty() {
-            return Err(CasifinError::EmptyCashFlowStream);
+            return Err(CasifinError::InsufficientCashFlows);
         }
 
         let one = Decimal::ONE;
@@ -261,7 +261,7 @@ pub mod returns {
         period_returns: &[Decimal],
     ) -> Result<Decimal, CasifinError> {
         if period_returns.is_empty() {
-            return Err(CasifinError::EmptyCashFlowStream);
+            return Err(CasifinError::InsufficientCashFlows);
         }
 
         let one = Decimal::ONE;
@@ -297,7 +297,7 @@ pub mod returns {
     pub fn money_weighted_return(
         cash_flows: &casifin_cashflow::CashFlowStream,
     ) -> Result<Decimal, CasifinError> {
-        casifin_cashflow::irr(cash_flows, Decimal::new(1, 1), 1000, Decimal::new(1, 12))
+        casifin_cashflow::irr(cash_flows, casifin_core::Config::default())
     }
 
     /// Sharpe Ratio = (Portfolio Return - Risk-Free Rate) / Standard Deviation
@@ -509,7 +509,8 @@ pub mod rates {
     ) -> Result<casifin_core::Rate, CasifinError> {
         let effective = effective_annual_rate(rate.annual_rate, rate.compounding)?;
         let stated = stated_from_effective(effective, target_compounding)?;
-        casifin_core::Rate::new(stated, target_compounding, rate.convention)
+        casifin_core::Rate::new(stated, target_compounding)
+            .map(|r| r.with_convention(rate.convention))
     }
 
     /// Approximate natural logarithm.
@@ -554,9 +555,9 @@ pub mod statistics {
     /// ```
     pub fn weighted_mean(values: &[Decimal], weights: &[Decimal]) -> Result<Decimal, CasifinError> {
         if values.len() != weights.len() {
-            return Err(CasifinError::InventoryError(
-                "values and weights must have same length".to_string(),
-            ));
+            return Err(CasifinError::InvalidInput {
+                reason: "values and weights must have same length".to_string(),
+            });
         }
 
         let mut weighted_sum = Decimal::ZERO;
@@ -588,7 +589,7 @@ pub mod statistics {
     /// ```
     pub fn harmonic_mean(values: &[Decimal]) -> Result<Decimal, CasifinError> {
         if values.is_empty() {
-            return Err(CasifinError::EmptyCashFlowStream);
+            return Err(CasifinError::InsufficientCashFlows);
         }
 
         let n = Decimal::from(values.len());
@@ -688,7 +689,8 @@ mod tests {
     #[test]
     fn test_effective_annual_rate() {
         let stated = Decimal::new(12, 2); // 12%
-        let ear = rates::effective_annual_rate(stated, casifin_core::Compounding::MONTHLY).unwrap();
+        let ear =
+            rates::effective_annual_rate(stated, casifin_core::Compounding::Discrete(12)).unwrap();
         // (1 + 0.01)^12 - 1 ≈ 0.1268
         assert!(ear > Decimal::new(12, 2));
         assert!(ear < Decimal::new(13, 2));

@@ -12,12 +12,9 @@ fn test_mortgage_vs_excel_reference() {
 
     // Standard 30-year fixed mortgage: $200,000 at 6%
     let principal = Money::from(200_000);
-    let rate = Rate::new(
-        Decimal::new(6, 2),
-        Compounding::MONTHLY,
-        DayCount::Actual365,
-    )
-    .unwrap();
+    let rate = Rate::new(Decimal::new(6, 2), Compounding::Discrete(12))
+        .unwrap()
+        .with_convention(DayCount::Actual365);
 
     let schedule = casifin.mortgage(principal, rate, 360).build().unwrap();
 
@@ -44,13 +41,13 @@ fn test_npv_irr_pipeline() {
     let casifin = Casifin::with_default_config();
 
     // Investment: -$10,000 initial, $3,000/year for 5 years
-    let flows = CashFlowStream::from_vec(vec![
-        Money::from(-10_000),
-        Money::from(3_000),
-        Money::from(3_000),
-        Money::from(3_000),
-        Money::from(3_000),
-        Money::from(3_000),
+    let flows = CashFlowStream::new(vec![
+        CashFlow::new(Money::from(-10_000)),
+        CashFlow::new(Money::from(3_000)),
+        CashFlow::new(Money::from(3_000)),
+        CashFlow::new(Money::from(3_000)),
+        CashFlow::new(Money::from(3_000)),
+        CashFlow::new(Money::from(3_000)),
     ]);
 
     // NPV at 10% should be positive
@@ -80,51 +77,6 @@ fn test_npv_irr_pipeline() {
     .into_iter()
     .sum();
     assert_eq!(npv_zero, sum);
-}
-
-/// ARM schedule vs known reference.
-#[test]
-fn test_arm_schedule_reference() {
-    let casifin = Casifin::with_default_config();
-
-    let principal = Money::from(300_000);
-    let initial_rate = Rate::new(
-        Decimal::new(5, 2),
-        Compounding::MONTHLY,
-        DayCount::Actual365,
-    )
-    .unwrap();
-
-    let adj_rate = Rate::new(
-        Decimal::new(7, 2),
-        Compounding::MONTHLY,
-        DayCount::Actual365,
-    )
-    .unwrap();
-
-    let caps = RateCaps::new(
-        Decimal::new(2, 2), // 2% periodic cap
-        Decimal::new(5, 2), // 5% lifetime cap
-    );
-
-    let arm = casifin
-        .arm(principal, initial_rate, 360)
-        .with_adjustment(61, adj_rate)
-        .with_caps(caps)
-        .build()
-        .unwrap();
-
-    // Should have entries
-    assert!(!arm.schedule.entries.is_empty());
-
-    // First payment should be at 5% rate
-    let first_payment = arm.schedule.entries[0].payment;
-    assert!(first_payment > Money::from(1600));
-    assert!(first_payment < Money::from(1700));
-
-    // Total principal should equal original
-    let principal_diff = (arm.schedule.total_principal - principal).abs();
-    assert!(principal_diff <= Money::from(1));
 }
 
 /// Depreciation total equals depreciable base.
@@ -191,7 +143,9 @@ fn test_inventory_total_consistency() {
 /// TVM round-trip: PV -> FV -> PV should be consistent.
 #[test]
 fn test_tvm_round_trip() {
-    let rate = Decimal::new(5, 2);
+    let rate = Rate::new(Decimal::new(5, 2), Compounding::Discrete(1))
+        .unwrap()
+        .with_convention(DayCount::Actual365);
     let nper = 10u32;
     let pv_original = Money::from(1000);
 

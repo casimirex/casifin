@@ -13,16 +13,19 @@ keywords = ["finance", "accounting", "calculator", "npv", "irr"]
 categories = ["finance", "mathematics", "science"]
 
 [workspace.dependencies]
-# Core dependencies
 rust_decimal = { version = "1.35", features = ["maths", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-
-# Dev dependencies
+approx = "0.5"
 criterion = "0.5"
 proptest = "1.4"
-approx = "0.5"
+
+[workspace.lints.clippy]
+cognitive_complexity = "deny"
+too_many_arguments = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
 
 [profile.release]
 lto = true

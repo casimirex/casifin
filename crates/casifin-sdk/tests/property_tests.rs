@@ -12,12 +12,11 @@ proptest! {
     fn npv_at_zero_rate_equals_sum_of_flows(
         flows in prop::collection::vec(any::<i64>(), 1..20)
     ) {
-        let money_flows: Vec<Money> = flows
-            .into_iter()
-            .map(|v| Money::from(v))
-            .collect();
+        let money_flows: Vec<Money> = flows.into_iter().map(Money::from).collect();
         let sum: Money = money_flows.iter().copied().sum();
-        let stream = CashFlowStream::from_vec(money_flows);
+        let stream = CashFlowStream::new(
+            money_flows.into_iter().map(CashFlow::new).collect(),
+        );
 
         let npv_result = npv(Decimal::ZERO, &stream).unwrap();
         assert_eq!(npv_result, sum);
@@ -34,8 +33,9 @@ proptest! {
     ) {
         let pmt_money = Money::from(pmt);
         let fv_money = Money::from(fv);
+        let rate = Rate::new(Decimal::ZERO, Compounding::Discrete(1)).unwrap();
 
-        let result = pv(Decimal::ZERO, nper, pmt_money, fv_money, PaymentDue::End).unwrap();
+        let result = pv(rate, nper, pmt_money, fv_money, PaymentDue::End).unwrap();
         let expected = pmt_money * Decimal::from(nper) + fv_money;
         assert_eq!(result, expected);
     }
@@ -51,8 +51,9 @@ proptest! {
     ) {
         let pmt_money = Money::from(pmt);
         let pv_money = Money::from(pv);
+        let rate = Rate::new(Decimal::ZERO, Compounding::Discrete(1)).unwrap();
 
-        let result = fv(Decimal::ZERO, nper, pmt_money, pv_money, PaymentDue::End).unwrap();
+        let result = fv(rate, nper, pmt_money, pv_money, PaymentDue::End).unwrap();
         let expected = pmt_money * Decimal::from(nper) + pv_money;
         assert_eq!(result, expected);
     }
@@ -94,7 +95,8 @@ proptest! {
         let ratio = casifin_sdk::ratios::liquidity::current_ratio(
             Money::from(assets),
             Money::from(liabilities),
-        ).unwrap();
+        )
+        .unwrap();
         assert!(ratio > Decimal::ZERO);
     }
 }

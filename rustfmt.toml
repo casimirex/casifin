@@ -1,12 +1,6 @@
 max_width = 100
 fn_single_line = false
 format_strings = true
-wrap_comments = true
-comment_width = 100
 imports_granularity = "Crate"
-group_imports = "StdExternalCrate"
 reorder_imports = true
-reorder_modules = true
-use_small_heuristics = "Default"
-tab_spaces = 4
-hard_tabs = false
+group_imports = "StdExternalCrate"

@@ -59,9 +59,9 @@ impl DepreciationMethod for StraightLine {
         period: u32,
     ) -> Result<Money, CasifinError> {
         if cost < salvage {
-            return Err(CasifinError::DepreciationError(
-                "cost must be >= salvage".to_string(),
-            ));
+            return Err(CasifinError::InvalidInput {
+                reason: "cost must be >= salvage".to_string(),
+            });
         }
         if life_years == 0 {
             return Err(CasifinError::InvalidPeriod(0));
@@ -132,9 +132,9 @@ impl DepreciationMethod for DoubleDecliningBalance {
         period: u32,
     ) -> Result<Money, CasifinError> {
         if cost < salvage {
-            return Err(CasifinError::DepreciationError(
-                "cost must be >= salvage".to_string(),
-            ));
+            return Err(CasifinError::InvalidInput {
+                reason: "cost must be >= salvage".to_string(),
+            });
         }
         if life_years == 0 {
             return Err(CasifinError::InvalidPeriod(0));

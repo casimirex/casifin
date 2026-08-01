@@ -1,44 +1,29 @@
 [package]
 name = "casifin-sdk"
-description = "Unified SDK interface for the casifin financial computation engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-documentation.workspace = true
-keywords.workspace = true
-categories.workspace = true
 
 [dependencies]
-casifin-core = { path = "../casifin-core", version = "0.1.0" }
-casifin-tvm = { path = "../casifin-tvm", version = "0.1.0" }
-casifin-cashflow = { path = "../casifin-cashflow", version = "0.1.0" }
-casifin-amortization = { path = "../casifin-amortization", version = "0.1.0" }
-casifin-ratios = { path = "../casifin-ratios", version = "0.1.0" }
-casifin-depreciation = { path = "../casifin-depreciation", version = "0.1.0" }
-casifin-inventory = { path = "../casifin-inventory", version = "0.1.0" }
+casifin-core = { path = "../casifin-core" }
+casifin-tvm = { path = "../casifin-tvm" }
+casifin-cashflow = { path = "../casifin-cashflow" }
+casifin-amortization = { path = "../casifin-amortization" }
+casifin-ratios = { path = "../casifin-ratios" }
+casifin-depreciation = { path = "../casifin-depreciation" }
+casifin-inventory = { path = "../casifin-inventory" }
 rust_decimal = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
-serde = { workspace = true }
+serde = { workspace = true, optional = true }
 
 [dev-dependencies]
+approx = { workspace = true }
 criterion = { workspace = true }
 proptest = { workspace = true }
-approx = { workspace = true }
 
-[[test]]
-name = "integration_tests"
-path = "tests/integration_tests.rs"
-
-[[test]]
-name = "property_tests"
-path = "tests/property_tests.rs"
-
-[[bench]]
-name = "amortization_bench"
-harness = false
-
-[[bench]]
-name = "cashflow_bench"
-harness = false
+[features]
+default = ["std"]
+std = []
+serde = ["dep:serde", "casifin-core/serde"]

@@ -2,31 +2,38 @@
 
 #![deny(warnings)]
 
-use casifin_core::{CasifinError, Money};
+use casifin_core::{CasifinError, Config, Money};
 use chrono::NaiveDate;
 use rust_decimal::{Decimal, MathematicalOps};
 
+// ============================================================================
+// CashFlow
+// ============================================================================
+
 /// A single cash flow with an optional date.
 ///
-/// # Fields
-/// * `amount` - The monetary amount (positive for inflow, negative for outflow)
-/// * `date` - Optional date; if `None`, the cash flow is indexed by period
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// # Panics
+/// This type does not panic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CashFlow {
-    /// The monetary amount.
     pub amount: Money,
-    /// The date of the cash flow, if any.
     pub date: Option<NaiveDate>,
 }
 
 impl CashFlow {
     /// Creates a new `CashFlow` without a date.
+    ///
+    /// # Panics
+    /// This function does not panic.
     pub fn new(amount: Money) -> Self {
         CashFlow { amount, date: None }
     }
 
     /// Creates a new dated `CashFlow`.
-    pub fn dated(amount: Money, date: NaiveDate) -> Self {
+    ///
+    /// # Panics
+    /// This function does not panic.
+    pub fn with_date(amount: Money, date: NaiveDate) -> Self {
         CashFlow {
             amount,
             date: Some(date),
@@ -34,79 +41,87 @@ impl CashFlow {
     }
 }
 
+// ============================================================================
+// CashFlowStream
+// ============================================================================
+
 /// A stream of cash flows.
-#[derive(Debug, Clone, Default)]
+///
+/// # Panics
+/// This type does not panic.
+#[derive(Debug, Clone, PartialEq)]
 pub struct CashFlowStream(Vec<CashFlow>);
 
 impl CashFlowStream {
     /// Creates a new `CashFlowStream` from a vector of cash flows.
+    ///
+    /// # Panics
+    /// This function does not panic.
     pub fn new(flows: Vec<CashFlow>) -> Self {
         CashFlowStream(flows)
     }
 
-    /// Creates a `CashFlowStream` from a vector of `Money` values (undated).
-    pub fn from_vec(flows: Vec<Money>) -> Self {
-        CashFlowStream(flows.into_iter().map(CashFlow::new).collect())
-    }
-
-    /// Returns the number of cash flows.
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
     /// Returns `true` if the stream is empty.
+    ///
+    /// # Panics
+    /// This function does not panic.
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
-    /// Returns the cash flow at the specified index.
-    pub fn get(&self, index: usize) -> Option<&CashFlow> {
-        self.0.get(index)
+    /// Returns the number of cash flows.
+    ///
+    /// # Panics
+    /// This function does not panic.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Returns `true` if the stream has both positive and negative cash flows.
+    ///
+    /// # Panics
+    /// This function does not panic.
+    pub fn has_positive_and_negative(&self) -> bool {
+        let has_pos = self.0.iter().any(|f| f.amount.is_positive());
+        let has_neg = self.0.iter().any(|f| f.amount.is_negative());
+        has_pos && has_neg
     }
 
     /// Returns an iterator over the cash flows.
+    ///
+    /// # Panics
+    /// This function does not panic.
     pub fn iter(&self) -> impl Iterator<Item = &CashFlow> {
         self.0.iter()
     }
-
-    /// Validates that the stream contains both positive and negative cash flows.
-    pub fn has_mixed_signs(&self) -> bool {
-        let mut has_positive = false;
-        let mut has_negative = false;
-        for cf in &self.0 {
-            if cf.amount.inner() > Decimal::ZERO {
-                has_positive = true;
-            } else if cf.amount.inner() < Decimal::ZERO {
-                has_negative = true;
-            }
-            if has_positive && has_negative {
-                return true;
-            }
-        }
-        false
-    }
 }
+
+// ============================================================================
+// NPV
+// ============================================================================
 
 /// Computes the Net Present Value of a cash flow stream.
 ///
 /// # Formula
 /// ```text
-/// NPV = Σ CF_t / (1 + r)^t
+/// NPV = Σ_{t=0}^{n-1} CF_t / (1 + rate)^t
 /// ```
+/// Note: t starts at 0 for the first flow (immediate).
 ///
 /// # Arguments
 /// * `rate` - The discount rate per period
 /// * `stream` - The cash flow stream
 ///
 /// # Returns
-/// `Ok(Money)` containing the NPV, or `Err(CasifinError)` if:
-/// - The stream is empty
-/// - `rate` is negative
+/// `Ok(Money)` containing the NPV, or `Err(CasifinError)` on invalid input.
+///
+/// # Panics
+/// This function does not panic.
 pub fn npv(rate: Decimal, stream: &CashFlowStream) -> Result<Money, CasifinError> {
     debug_assert!(rate >= Decimal::ZERO, "rate must be non-negative");
 
     if stream.is_empty() {
-        return Err(CasifinError::EmptyCashFlowStream);
+        return Err(CasifinError::InsufficientCashFlows);
     }
     if rate < Decimal::ZERO {
         return Err(CasifinError::InvalidRate(rate));
@@ -136,72 +151,73 @@ pub fn npv(rate: Decimal, stream: &CashFlowStream) -> Result<Money, CasifinError
     Ok(npv)
 }
 
+// ============================================================================
+// IRR
+// ============================================================================
+
 /// Computes the Internal Rate of Return of a cash flow stream.
 ///
 /// Uses a hybrid Newton-Raphson / bisection solver.
 ///
 /// # Arguments
-/// * `stream` - The cash flow stream
-/// * `guess` - Initial guess for the rate
-/// * `max_iter` - Maximum iterations
-/// * `eps` - Convergence threshold
+/// * `stream` - The cash flow stream (must have both positive and negative flows)
+/// * `config` - Solver configuration (eps, max_iterations, guess)
 ///
 /// # Returns
-/// `Ok(Decimal)` containing the IRR, or `Err(CasifinError::IrrConvergenceFailure)`
-/// if the solver does not converge.
-pub fn irr(
-    stream: &CashFlowStream,
-    guess: Decimal,
-    max_iter: u32,
-    eps: Decimal,
-) -> Result<Decimal, CasifinError> {
-    debug_assert!(!stream.is_empty(), "stream must not be empty");
-    debug_assert!(stream.has_mixed_signs(), "stream must have mixed signs");
-    debug_assert!(max_iter > 0, "max_iter must be positive");
-    debug_assert!(eps > Decimal::ZERO, "eps must be positive");
-
+/// `Ok(Decimal)` containing the IRR, or `Err(CasifinError)` if the solver
+/// does not converge or the stream is invalid.
+///
+/// # Panics
+/// This function does not panic.
+pub fn irr(stream: &CashFlowStream, config: Config) -> Result<Decimal, CasifinError> {
     if stream.is_empty() {
-        return Err(CasifinError::EmptyCashFlowStream);
+        return Err(CasifinError::InsufficientCashFlows);
     }
-    if !stream.has_mixed_signs() {
-        return Err(CasifinError::XirrSignRequirement);
+    if !stream.has_positive_and_negative() {
+        return Err(CasifinError::InsufficientCashFlows);
     }
 
-    // Newton-Raphson solver
-    let mut rate = guess;
+    debug_assert!(!stream.is_empty(), "stream must not be empty");
+    debug_assert!(
+        stream.has_positive_and_negative(),
+        "stream must have mixed signs"
+    );
 
-    for _ in 0..max_iter {
-        let (f, df) = irr_equation_and_derivative(stream, rate);
+    let mut rate = config.guess;
 
-        if f.abs() < eps {
+    for _ in 0..config.max_iterations {
+        let (f, df) = irr_eq_and_derivative(stream, rate);
+
+        if f.abs() < config.eps {
             return Ok(rate);
         }
 
-        if df.abs() < eps {
-            // Derivative too small, switch to bisection
-            return irr_bisection(stream, eps);
+        if df.abs() < config.eps {
+            return irr_bisection(stream, config.eps);
         }
 
         let new_rate = rate - f / df;
-        if (new_rate - rate).abs() < eps {
+        if (new_rate - rate).abs() < config.eps {
             return Ok(new_rate);
         }
         rate = new_rate;
 
-        // Clamp rate to valid range
         if rate < Decimal::NEGATIVE_ONE {
-            rate = Decimal::new(-9, 1); // -0.9
+            rate = Decimal::new(-9, 1);
         }
         if rate > Decimal::ONE {
-            rate = Decimal::new(5, 1); // 5.0
+            rate = Decimal::new(5, 1);
         }
     }
 
-    Err(CasifinError::IrrConvergenceFailure { max_iter, eps })
+    Err(CasifinError::IrrConvergenceFailure {
+        max_iter: config.max_iterations,
+        eps: config.eps,
+    })
 }
 
 /// Evaluates the IRR equation and its derivative.
-fn irr_equation_and_derivative(stream: &CashFlowStream, rate: Decimal) -> (Decimal, Decimal) {
+fn irr_eq_and_derivative(stream: &CashFlowStream, rate: Decimal) -> (Decimal, Decimal) {
     let one = Decimal::ONE;
     let mut f = Decimal::ZERO;
     let mut df = Decimal::ZERO;
@@ -214,11 +230,9 @@ fn irr_equation_and_derivative(stream: &CashFlowStream, rate: Decimal) -> (Decim
             None => continue,
         };
 
-        // f = CF / (1 + r)^t
         let term = cf.amount.inner() / power;
         f += term;
 
-        // df/drate = -t * CF / (1 + r)^(t+1)
         let df_term = -t_dec * cf.amount.inner() / (power * base);
         df += df_term;
     }
@@ -228,7 +242,7 @@ fn irr_equation_and_derivative(stream: &CashFlowStream, rate: Decimal) -> (Decim
 
 /// Bisection solver for IRR.
 fn irr_bisection(stream: &CashFlowStream, eps: Decimal) -> Result<Decimal, CasifinError> {
-    let mut low = Decimal::new(-9, 1); // -0.9
+    let mut low = Decimal::new(-9, 1);
     let mut high = Decimal::ONE;
     let mut mid = (low + high) / Decimal::from(2);
 
@@ -260,10 +274,10 @@ fn irr_bisection(stream: &CashFlowStream, eps: Decimal) -> Result<Decimal, Casif
     })
 }
 
-/// Evaluates the IRR equation.
+/// Evaluates the IRR equation: NPV at a given rate.
 fn irr_equation(stream: &CashFlowStream, rate: Decimal) -> Decimal {
     let one = Decimal::ONE;
-    let mut npv = Decimal::ZERO;
+    let mut npv_val = Decimal::ZERO;
 
     for (t, cf) in stream.iter().enumerate() {
         let base = one + rate;
@@ -273,38 +287,42 @@ fn irr_equation(stream: &CashFlowStream, rate: Decimal) -> Decimal {
         };
 
         let pv = cf.amount.inner() / power;
-        npv += pv;
+        npv_val += pv;
     }
 
-    npv
+    npv_val
 }
 
-/// Computes the NPV with actual dates (XNPV).
+// ============================================================================
+// XNPV
+// ============================================================================
+
+/// Computes the Net Present Value with actual dates (XNPV).
 ///
 /// # Formula
 /// ```text
-/// XNPV = Σ CF_t / (1 + r)^(days_t / 365)
+/// XNPV = Σ CF_i / (1 + rate)^(days_i / 365)
 /// ```
 ///
 /// # Arguments
 /// * `rate` - The annual discount rate
-/// * `stream` - The dated cash flow stream
+/// * `stream` - The dated cash flow stream (all flows must have dates)
 ///
 /// # Returns
-/// `Ok(Money)` containing the XNPV, or `Err(CasifinError)` if:
-/// - The stream is empty or contains undated flows
-/// - `rate` is negative
+/// `Ok(Money)` containing the XNPV, or `Err(CasifinError)` on invalid input.
+///
+/// # Panics
+/// This function does not panic.
 pub fn xnpv(rate: Decimal, stream: &CashFlowStream) -> Result<Money, CasifinError> {
     debug_assert!(rate >= Decimal::ZERO, "rate must be non-negative");
 
     if stream.is_empty() {
-        return Err(CasifinError::EmptyCashFlowStream);
+        return Err(CasifinError::InsufficientCashFlows);
     }
     if rate < Decimal::ZERO {
         return Err(CasifinError::InvalidRate(rate));
     }
 
-    // Find the first date
     let first_date = stream
         .iter()
         .find_map(|cf| cf.date)
@@ -312,9 +330,9 @@ pub fn xnpv(rate: Decimal, stream: &CashFlowStream) -> Result<Money, CasifinErro
             "No dates in stream".to_string(),
         ))?;
 
-    let one = Decimal::ONE;
     let days_per_year = Decimal::from(365);
-    let mut xnpv = Money::ZERO;
+    let one = Decimal::ONE;
+    let mut xnpv_val = Money::ZERO;
 
     for cf in stream.iter() {
         let date = cf.date.ok_or(CasifinError::DateOutOfRange(
@@ -325,7 +343,7 @@ pub fn xnpv(rate: Decimal, stream: &CashFlowStream) -> Result<Money, CasifinErro
         let year_frac = Decimal::from(days) / days_per_year;
 
         if year_frac < Decimal::ZERO {
-            continue; // Skip flows before the first date
+            continue;
         }
 
         let discount = (one + rate).powd(year_frac);
@@ -336,45 +354,44 @@ pub fn xnpv(rate: Decimal, stream: &CashFlowStream) -> Result<Money, CasifinErro
                 operation: "xnpv discount",
             })?;
 
-        xnpv = xnpv + pv;
+        xnpv_val = xnpv_val + pv;
     }
 
-    Ok(xnpv)
+    Ok(xnpv_val)
 }
 
-/// Computes the IRR with actual dates (XIRR).
+// ============================================================================
+// XIRR
+// ============================================================================
+
+/// Computes the Internal Rate of Return with actual dates (XIRR).
 ///
-/// Uses Newton-Raphson with date-weighted derivatives.
+/// Uses a hybrid Newton-Raphson / bisection solver with date-weighted derivatives.
 ///
 /// # Arguments
-/// * `stream` - The dated cash flow stream
-/// * `guess` - Initial guess for the rate
-/// * `max_iter` - Maximum iterations
-/// * `eps` - Convergence threshold
+/// * `stream` - The dated cash flow stream (must have both positive and negative flows)
+/// * `config` - Solver configuration (eps, max_iterations, guess)
 ///
 /// # Returns
-/// `Ok(Decimal)` containing the XIRR, or `Err(CasifinError)` if:
-/// - The stream is empty or lacks mixed signs
-/// - The solver does not converge
-pub fn xirr(
-    stream: &CashFlowStream,
-    guess: Decimal,
-    max_iter: u32,
-    eps: Decimal,
-) -> Result<Decimal, CasifinError> {
+/// `Ok(Decimal)` containing the XIRR, or `Err(CasifinError)` if the solver
+/// does not converge.
+///
+/// # Panics
+/// This function does not panic.
+pub fn xirr(stream: &CashFlowStream, config: Config) -> Result<Decimal, CasifinError> {
     debug_assert!(!stream.is_empty(), "stream must not be empty");
-    debug_assert!(stream.has_mixed_signs(), "stream must have mixed signs");
-    debug_assert!(max_iter > 0, "max_iter must be positive");
-    debug_assert!(eps > Decimal::ZERO, "eps must be positive");
+    debug_assert!(
+        stream.has_positive_and_negative(),
+        "stream must have mixed signs"
+    );
 
     if stream.is_empty() {
-        return Err(CasifinError::EmptyCashFlowStream);
+        return Err(CasifinError::InsufficientCashFlows);
     }
-    if !stream.has_mixed_signs() {
-        return Err(CasifinError::XirrSignRequirement);
+    if !stream.has_positive_and_negative() {
+        return Err(CasifinError::InsufficientCashFlows);
     }
 
-    // Find the first date
     let first_date = stream
         .iter()
         .find_map(|cf| cf.date)
@@ -382,22 +399,21 @@ pub fn xirr(
             "No dates in stream".to_string(),
         ))?;
 
-    // Newton-Raphson solver
-    let mut rate = guess;
+    let mut rate = config.guess;
 
-    for _ in 0..max_iter {
-        let (f, df) = xirr_equation_and_derivative_dated(stream, first_date, rate)?;
+    for _ in 0..config.max_iterations {
+        let (f, df) = xirr_eq_and_derivative(stream, first_date, rate)?;
 
-        if f.abs() < eps {
+        if f.abs() < config.eps {
             return Ok(rate);
         }
 
-        if df.abs() < eps {
-            return xirr_bisection(stream, first_date, eps);
+        if df.abs() < config.eps {
+            return xirr_bisection(stream, first_date, config.eps);
         }
 
         let new_rate = rate - f / df;
-        if (new_rate - rate).abs() < eps {
+        if (new_rate - rate).abs() < config.eps {
             return Ok(new_rate);
         }
         rate = new_rate;
@@ -410,11 +426,14 @@ pub fn xirr(
         }
     }
 
-    Err(CasifinError::IrrConvergenceFailure { max_iter, eps })
+    Err(CasifinError::IrrConvergenceFailure {
+        max_iter: config.max_iterations,
+        eps: config.eps,
+    })
 }
 
-/// Evaluates the XIRR equation and its derivative for dated cash flows.
-fn xirr_equation_and_derivative_dated(
+/// Evaluates the XIRR equation and its derivative.
+fn xirr_eq_and_derivative(
     stream: &CashFlowStream,
     first_date: NaiveDate,
     rate: Decimal,
@@ -437,10 +456,7 @@ fn xirr_equation_and_derivative_dated(
         }
 
         let base = one + rate;
-        let power = match base.powd(t).into() {
-            Some(p) => p,
-            None => continue,
-        };
+        let power = base.powd(t);
 
         let term = cf.amount.inner() / power;
         f += term;
@@ -452,7 +468,7 @@ fn xirr_equation_and_derivative_dated(
     Ok((f, df))
 }
 
-/// Evaluates XNPV at a given rate for bisection.
+/// Evaluates XNPV at a given rate.
 fn xnpv_at_rate(stream: &CashFlowStream, first_date: NaiveDate, rate: Decimal) -> Decimal {
     let days_per_year = Decimal::from(365);
     let one = Decimal::ONE;
@@ -515,76 +531,124 @@ fn xirr_bisection(
     })
 }
 
+// ============================================================================
+// Tests
+// ============================================================================
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_npv_simple() {
-        let flows = CashFlowStream::from_vec(vec![
-            Money::from(-1000),
-            Money::from(500),
-            Money::from(500),
-            Money::from(500),
+    fn npv_zero_rate() {
+        // NPV at 0% = sum of all flows
+        let flows = CashFlowStream::new(vec![
+            CashFlow::new(Money::from_decimal(Decimal::new(-1000, 0))),
+            CashFlow::new(Money::from_decimal(Decimal::new(300, 0))),
+            CashFlow::new(Money::from_decimal(Decimal::new(400, 0))),
+            CashFlow::new(Money::from_decimal(Decimal::new(400, 0))),
+            CashFlow::new(Money::from_decimal(Decimal::new(300, 0))),
         ]);
-        let rate = Decimal::new(10, 2); // 10%
-        let result = npv(rate, &flows).unwrap();
-        // NPV ≈ -1000 + 500/1.1 + 500/1.1^2 + 500/1.1^3 ≈ 243.43
-        assert!(result > Money::from(200));
-        assert!(result < Money::from(300));
+        let result = npv(Decimal::ZERO, &flows).unwrap();
+        // -1000 + 300 + 400 + 400 + 300 = 400
+        assert_eq!(result, Money::from_decimal(Decimal::new(400, 0)));
     }
 
     #[test]
-    fn test_npv_zero_rate() {
-        let flows =
-            CashFlowStream::from_vec(vec![Money::from(-1000), Money::from(500), Money::from(500)]);
-        let rate = Decimal::ZERO;
-        let result = npv(rate, &flows).unwrap();
-        // NPV = -1000 + 500 + 500 = 0
-        assert_eq!(result, Money::ZERO);
-    }
-
-    #[test]
-    fn test_irr_simple() {
-        let flows = CashFlowStream::from_vec(vec![
-            Money::from(-1000),
-            Money::from(500),
-            Money::from(500),
-            Money::from(500),
+    fn npv_known_value() {
+        // flows [-1000, 300, 400, 400, 300] at 8%
+        // NPV = -1000 + 300/1.08 + 400/1.08^2 + 400/1.08^3 + 300/1.08^4 ≈ 158.76
+        let flows = CashFlowStream::new(vec![
+            CashFlow::new(Money::from_decimal(Decimal::new(-1000, 0))),
+            CashFlow::new(Money::from_decimal(Decimal::new(300, 0))),
+            CashFlow::new(Money::from_decimal(Decimal::new(400, 0))),
+            CashFlow::new(Money::from_decimal(Decimal::new(400, 0))),
+            CashFlow::new(Money::from_decimal(Decimal::new(300, 0))),
         ]);
-        let result = irr(&flows, Decimal::new(1, 1), 1000, Decimal::new(1, 12));
-        assert!(result.is_ok());
-        let irr_val = result.unwrap();
-        // IRR ≈ 23.4%
-        assert!(irr_val > Decimal::new(2, 1));
-        assert!(irr_val < Decimal::new(3, 1));
+        let rate = Decimal::new(8, 2); // 8%
+        let result = npv(rate, &flows).unwrap();
+        assert!(result > Money::from_decimal(Decimal::new(158, 0)));
+        assert!(result < Money::from_decimal(Decimal::new(160, 0)));
     }
 
     #[test]
-    fn test_xnpv_dated() {
+    fn irr_known_value() {
+        // flows [-1000, 300, 400, 400, 300] IRR = 14.49%
+        let flows = CashFlowStream::new(vec![
+            CashFlow::new(Money::from_decimal(Decimal::new(-1000, 0))),
+            CashFlow::new(Money::from_decimal(Decimal::new(300, 0))),
+            CashFlow::new(Money::from_decimal(Decimal::new(400, 0))),
+            CashFlow::new(Money::from_decimal(Decimal::new(400, 0))),
+            CashFlow::new(Money::from_decimal(Decimal::new(300, 0))),
+        ]);
+        let config = Config::default();
+        let result = irr(&flows, config).unwrap();
+        // Should be approximately 14.49%
+        assert!(result > Decimal::new(14, 2)); // > 0.14
+        assert!(result < Decimal::new(15, 2)); // < 0.15
+    }
+
+    #[test]
+    fn irr_insufficient_flows() {
+        // All positive flows should return error
+        let flows = CashFlowStream::new(vec![
+            CashFlow::new(Money::from_decimal(Decimal::new(100, 0))),
+            CashFlow::new(Money::from_decimal(Decimal::new(200, 0))),
+        ]);
+        let config = Config::default();
+        let result = irr(&flows, config);
+        assert!(matches!(result, Err(CasifinError::InsufficientCashFlows)));
+    }
+
+    #[test]
+    fn xnpv_known_value() {
         let date1 = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
         let date2 = NaiveDate::from_ymd_opt(2024, 12, 31).unwrap();
         let date3 = NaiveDate::from_ymd_opt(2025, 12, 31).unwrap();
 
         let flows = CashFlowStream::new(vec![
-            CashFlow::dated(Money::from(-1000), date1),
-            CashFlow::dated(Money::from(500), date2),
-            CashFlow::dated(Money::from(500), date3),
+            CashFlow::with_date(Money::from_decimal(Decimal::new(-1000, 0)), date1),
+            CashFlow::with_date(Money::from_decimal(Decimal::new(500, 0)), date2),
+            CashFlow::with_date(Money::from_decimal(Decimal::new(500, 0)), date3),
         ]);
 
         let rate = Decimal::new(10, 2);
         let result = xnpv(rate, &flows).unwrap();
-        assert!(result > Money::from(-1000));
+        // Should be negative (investment not fully recovered at 10%)
+        assert!(result < Money::ZERO);
     }
 
     #[test]
-    fn test_cashflow_mixed_signs() {
-        let flows =
-            CashFlowStream::from_vec(vec![Money::from(-1000), Money::from(500), Money::from(500)]);
-        assert!(flows.has_mixed_signs());
+    fn xirr_known_value() {
+        let date1 = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
+        let date2 = NaiveDate::from_ymd_opt(2024, 12, 31).unwrap();
+        let date3 = NaiveDate::from_ymd_opt(2025, 12, 31).unwrap();
 
-        let flows2 =
-            CashFlowStream::from_vec(vec![Money::from(100), Money::from(200), Money::from(300)]);
-        assert!(!flows2.has_mixed_signs());
+        // Profitable investment: -1000, +600, +600 -> positive return
+        let flows = CashFlowStream::new(vec![
+            CashFlow::with_date(Money::from_decimal(Decimal::new(-1000, 0)), date1),
+            CashFlow::with_date(Money::from_decimal(Decimal::new(600, 0)), date2),
+            CashFlow::with_date(Money::from_decimal(Decimal::new(600, 0)), date3),
+        ]);
+
+        let config = Config::default();
+        let result = xirr(&flows, config).unwrap();
+        // XIRR should be positive for this investment
+        assert!(result > Decimal::ZERO);
+    }
+
+    #[test]
+    fn irr_convergence() {
+        // Pathological flows that should not converge: nearly-equal sign flows
+        let flows = CashFlowStream::new(vec![
+            CashFlow::new(Money::from_decimal(Decimal::new(-1, 0))),
+            CashFlow::new(Money::from_decimal(Decimal::new(1000000, 0))),
+        ]);
+        let config = Config::builder()
+            .max_iterations(5)
+            .eps(Decimal::new(1, 20))
+            .build();
+        let result = irr(&flows, config);
+        assert!(result.is_err());
     }
 }

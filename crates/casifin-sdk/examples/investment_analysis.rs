@@ -18,13 +18,13 @@ fn main() -> Result<(), CasifinError> {
     println!("  Sale Price (year 5): $550,000 (after costs)\n");
 
     // Cash flows
-    let flows = CashFlowStream::from_vec(vec![
-        Money::from(-100_000),         // Initial down payment
-        Money::from(15_000),           // Year 1 cash flow
-        Money::from(15_000),           // Year 2
-        Money::from(15_000),           // Year 3
-        Money::from(15_000),           // Year 4
-        Money::from(15_000 + 550_000), // Year 5: cash flow + sale proceeds
+    let flows = CashFlowStream::new(vec![
+        CashFlow::new(Money::from(-100_000)), // Initial down payment
+        CashFlow::new(Money::from(15_000)),   // Year 1 cash flow
+        CashFlow::new(Money::from(15_000)),   // Year 2
+        CashFlow::new(Money::from(15_000)),   // Year 3
+        CashFlow::new(Money::from(15_000)),   // Year 4
+        CashFlow::new(Money::from(15_000 + 550_000)), // Year 5: cash flow + sale proceeds
     ]);
 
     // Calculate NPV at 10% required return

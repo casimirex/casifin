@@ -7,15 +7,12 @@
 
 // Re-export all sub-crates
 pub use casifin_amortization as amortization;
-pub use casifin_amortization::{
-    AdjustableRateBuilder, AdjustableRateSchedule, AmortizationBuilder, AmortizationEntry,
-    AmortizationSchedule, RateCaps,
-};
+pub use casifin_amortization::{AmortizationBuilder, AmortizationEntry, AmortizationSchedule};
 pub use casifin_cashflow as cashflow;
 pub use casifin_cashflow::{irr, npv, xirr, xnpv, CashFlow, CashFlowStream};
 pub use casifin_core::{
-    CasifinError, Compounding, Config, ConfigBuilder, DayCount, FinancialCalculation, Money, Rate,
-    Schedulable,
+    CasifinError, Compounding, Config, ConfigBuilder, DayCount, FinancialCalculation, Money,
+    PaymentDue, Rate, Schedulable,
 };
 pub use casifin_depreciation as depreciation;
 pub use casifin_depreciation::{DepreciationMethod, DoubleDecliningBalance, StraightLine};
@@ -23,7 +20,7 @@ pub use casifin_inventory as inventory;
 pub use casifin_inventory::{Fifo, InventoryLot, InventoryMethod, Lifo, WeightedAverage};
 pub use casifin_ratios as ratios;
 pub use casifin_tvm as tvm;
-pub use casifin_tvm::{fv, fv_uneven_cashflows, nper, pmt, pv, pv_perpetuity, rate, PaymentDue};
+pub use casifin_tvm::{fv, fv_uneven_cashflows, nper, pmt, pv, pv_perpetuity, rate};
 use rust_decimal::Decimal;
 
 /// The main entry point for casifin consumers.
@@ -39,7 +36,9 @@ use rust_decimal::Decimal;
 ///
 /// // Calculate a mortgage payment
 /// let principal = Money::from(200000);
-/// let rate = Rate::new(Decimal::new(6, 2), Compounding::MONTHLY, DayCount::Actual365).unwrap();
+/// let rate = Rate::new(Decimal::new(6, 2), Compounding::Discrete(12))
+///     .unwrap()
+///     .with_convention(DayCount::Actual365);
 /// let schedule = casifin.mortgage(principal, rate, 360).build().unwrap();
 /// ```
 pub struct Casifin {
@@ -75,33 +74,7 @@ impl Casifin {
         term_months: u32,
     ) -> amortization::AmortizationBuilder {
         amortization::AmortizationBuilder::new(principal, rate, term_months)
-    }
-
-    /// Creates an Adjustable-Rate Mortgage (ARM) builder.
-    ///
-    /// # Arguments
-    /// * `principal` - The loan amount
-    /// * `initial_rate` - The initial annual interest rate
-    /// * `term_months` - The loan term in months
-    ///
-    /// # Example
-    /// ```
-    /// use casifin_sdk::{Casifin, Money, Rate, Compounding, DayCount};
-    /// use rust_decimal::Decimal;
-    ///
-    /// let casifin = Casifin::with_default_config();
-    /// let arm = casifin
-    ///     .arm(Money::from(300_000), Rate::new(Decimal::new(5, 2), Compounding::MONTHLY, DayCount::Actual365).unwrap(), 360)
-    ///     .with_adjustment(61, Rate::new(Decimal::new(7, 2), Compounding::MONTHLY, DayCount::Actual365).unwrap())
-    ///     .build();
-    /// ```
-    pub fn arm(
-        &self,
-        principal: Money,
-        initial_rate: Rate,
-        term_months: u32,
-    ) -> amortization::AdjustableRateBuilder {
-        amortization::AdjustableRateBuilder::new(principal, initial_rate, term_months)
+            .with_config(self.config)
     }
 
     /// Computes the Net Present Value of a cash flow stream.
@@ -132,12 +105,7 @@ impl Casifin {
     /// `Ok(Decimal)` containing the IRR, or `Err(CasifinError)` if the solver
     /// does not converge.
     pub fn irr(&self, flows: &CashFlowStream) -> Result<Decimal, CasifinError> {
-        irr(
-            flows,
-            self.config.guess,
-            self.config.max_iterations,
-            self.config.eps,
-        )
+        irr(flows, self.config)
     }
 
     /// Computes the Net Present Value with actual dates (XNPV).
@@ -168,18 +136,13 @@ impl Casifin {
     /// `Ok(Decimal)` containing the XIRR, or `Err(CasifinError)` if the solver
     /// does not converge.
     pub fn xirr(&self, flows: &CashFlowStream) -> Result<Decimal, CasifinError> {
-        xirr(
-            flows,
-            self.config.guess,
-            self.config.max_iterations,
-            self.config.eps,
-        )
+        xirr(flows, self.config)
     }
 
     /// Computes the present value of an annuity.
     ///
     /// # Arguments
-    /// * `rate` - The interest rate per period
+    /// * `rate` - The interest rate
     /// * `nper` - The total number of payment periods
     /// * `pmt` - The payment made each period
     /// * `fv` - The future value (cash balance after last payment)
@@ -187,9 +150,10 @@ impl Casifin {
     ///
     /// # Returns
     /// `Ok(Money)` containing the present value, or `Err(CasifinError)` on invalid input.
+    #[allow(clippy::too_many_arguments)]
     pub fn pv(
         &self,
-        rate: Decimal,
+        rate: Rate,
         nper: u32,
         pmt: Money,
         fv: Money,
@@ -201,7 +165,7 @@ impl Casifin {
     /// Computes the future value of an annuity.
     ///
     /// # Arguments
-    /// * `rate` - The interest rate per period
+    /// * `rate` - The interest rate
     /// * `nper` - The total number of payment periods
     /// * `pmt` - The payment made each period
     /// * `pv` - The present value (initial investment)
@@ -209,9 +173,10 @@ impl Casifin {
     ///
     /// # Returns
     /// `Ok(Money)` containing the future value, or `Err(CasifinError)` on invalid input.
+    #[allow(clippy::too_many_arguments)]
     pub fn fv(
         &self,
-        rate: Decimal,
+        rate: Rate,
         nper: u32,
         pmt: Money,
         pv: Money,
@@ -223,7 +188,7 @@ impl Casifin {
     /// Computes the payment amount for an annuity.
     ///
     /// # Arguments
-    /// * `rate` - The interest rate per period
+    /// * `rate` - The interest rate
     /// * `nper` - The total number of payment periods
     /// * `pv` - The present value (loan amount or investment)
     /// * `fv` - The future value (desired balance after last payment)
@@ -231,9 +196,10 @@ impl Casifin {
     ///
     /// # Returns
     /// `Ok(Money)` containing the payment amount, or `Err(CasifinError)` on invalid input.
+    #[allow(clippy::too_many_arguments)]
     pub fn pmt(
         &self,
-        rate: Decimal,
+        rate: Rate,
         nper: u32,
         pv: Money,
         fv: Money,
@@ -245,23 +211,24 @@ impl Casifin {
     /// Computes the number of periods required to reach a future value.
     ///
     /// # Arguments
-    /// * `rate` - The interest rate per period (must be positive)
+    /// * `rate` - The interest rate (must be positive)
     /// * `pmt` - The payment made each period (must be non-zero)
     /// * `pv` - The present value
     /// * `fv` - The future value
     /// * `due` - Whether payments are due at beginning or end of period
     ///
     /// # Returns
-    /// `Ok(u32)` containing the number of periods (rounded up), or `Err(CasifinError)`
+    /// `Ok(Decimal)` containing the number of periods, or `Err(CasifinError)`
     /// on invalid input.
+    #[allow(clippy::too_many_arguments)]
     pub fn nper(
         &self,
-        rate: Decimal,
+        rate: Rate,
         pmt: Money,
         pv: Money,
         fv: Money,
         due: PaymentDue,
-    ) -> Result<u32, CasifinError> {
+    ) -> Result<Decimal, CasifinError> {
         nper(rate, pmt, pv, fv, due)
     }
 
@@ -279,6 +246,7 @@ impl Casifin {
     /// # Returns
     /// `Ok(Decimal)` containing the rate per period, or `Err(CasifinError)` if the
     /// solver does not converge.
+    #[allow(clippy::too_many_arguments)]
     pub fn rate(
         &self,
         nper: u32,
@@ -287,16 +255,7 @@ impl Casifin {
         fv: Money,
         due: PaymentDue,
     ) -> Result<Decimal, CasifinError> {
-        rate(
-            nper,
-            pmt,
-            pv,
-            fv,
-            due,
-            self.config.guess,
-            self.config.max_iterations,
-            self.config.eps,
-        )
+        rate(nper, pmt, pv, fv, due, None, self.config)
     }
 }
 
@@ -320,12 +279,9 @@ mod tests {
     fn test_casifin_mortgage() {
         let casifin = Casifin::with_default_config();
         let principal = Money::from(200000);
-        let rate = Rate::new(
-            Decimal::new(6, 2),
-            Compounding::MONTHLY,
-            DayCount::Actual365,
-        )
-        .unwrap();
+        let rate = Rate::new(Decimal::new(6, 2), Compounding::Discrete(12))
+            .unwrap()
+            .with_convention(DayCount::Actual365);
 
         let schedule = casifin.mortgage(principal, rate, 360).build().unwrap();
         assert_eq!(schedule.entries.len(), 360);
@@ -334,26 +290,26 @@ mod tests {
     #[test]
     fn test_casifin_npv() {
         let casifin = Casifin::with_default_config();
-        let flows = CashFlowStream::from_vec(vec![
-            Money::from(-1000),
-            Money::from(500),
-            Money::from(500),
-            Money::from(500),
+        let flows = CashFlowStream::new(vec![
+            CashFlow::new(Money::from(-1000)),
+            CashFlow::new(Money::from(500)),
+            CashFlow::new(Money::from(500)),
+            CashFlow::new(Money::from(500)),
         ]);
 
         let rate = Decimal::new(10, 2);
         let npv_result = casifin.npv(rate, &flows).unwrap();
-        assert!(npv_result > Money::from(200));
+        assert!(npv_result > Money::from_decimal(Decimal::new(200, 0)));
     }
 
     #[test]
     fn test_casifin_irr() {
         let casifin = Casifin::with_default_config();
-        let flows = CashFlowStream::from_vec(vec![
-            Money::from(-1000),
-            Money::from(500),
-            Money::from(500),
-            Money::from(500),
+        let flows = CashFlowStream::new(vec![
+            CashFlow::new(Money::from(-1000)),
+            CashFlow::new(Money::from(500)),
+            CashFlow::new(Money::from(500)),
+            CashFlow::new(Money::from(500)),
         ]);
 
         let irr_result = casifin.irr(&flows);

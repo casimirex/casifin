@@ -2,14 +2,18 @@
 
 #![deny(warnings)]
 
-use casifin_core::{CasifinError, Money, Rate};
-use casifin_tvm::pmt;
-use chrono::NaiveDate;
+use casifin_core::{CasifinError, Config, Money, PaymentDue, Rate};
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
+
+// ============================================================================
+// AmortizationEntry
+// ============================================================================
 
 /// A single entry in an amortization schedule.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+///
+/// # Panics
+/// This type does not panic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AmortizationEntry {
     /// The period number (1-indexed).
     pub period: u32,
@@ -21,12 +25,17 @@ pub struct AmortizationEntry {
     pub interest: Money,
     /// The remaining balance after this payment.
     pub balance: Money,
-    /// The date of this payment (optional).
-    pub date: Option<NaiveDate>,
 }
 
+// ============================================================================
+// AmortizationSchedule
+// ============================================================================
+
 /// An amortization schedule for a loan.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+///
+/// # Panics
+/// This type does not panic.
+#[derive(Debug, Clone, PartialEq)]
 pub struct AmortizationSchedule {
     /// The individual schedule entries.
     pub entries: Vec<AmortizationEntry>,
@@ -40,27 +49,39 @@ pub struct AmortizationSchedule {
 
 impl AmortizationSchedule {
     /// Creates a new empty schedule.
+    ///
+    /// # Panics
+    /// This function does not panic.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            entries: Vec::new(),
+            total_payments: Money::ZERO,
+            total_interest: Money::ZERO,
+            total_principal: Money::ZERO,
+        }
     }
 }
 
+impl Default for AmortizationSchedule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// AmortizationBuilder
+// ============================================================================
+
 /// Builder for creating amortization schedules.
+///
+/// # Panics
+/// This type does not panic.
 pub struct AmortizationBuilder {
-    /// The loan principal.
     principal: Money,
-    /// The interest rate.
     rate: Rate,
-    /// The term in months.
     term_months: u32,
-    /// Optional payment modifier function.
+    config: Config,
     payment_modifier: Option<Box<dyn Fn(u32, Money) -> Money>>,
-    /// Day count convention (30/360 or Actual/365).
-    day_count_360: bool,
-    /// Start date (optional).
-    start_date: Option<NaiveDate>,
-    /// Configuration epsilon for final balance check.
-    eps: Decimal,
 }
 
 impl std::fmt::Debug for AmortizationBuilder {
@@ -69,9 +90,20 @@ impl std::fmt::Debug for AmortizationBuilder {
             .field("principal", &self.principal)
             .field("rate", &self.rate)
             .field("term_months", &self.term_months)
-            .field("day_count_360", &self.day_count_360)
-            .field("eps", &self.eps)
+            .field("config", &self.config)
             .finish_non_exhaustive()
+    }
+}
+
+impl Clone for AmortizationBuilder {
+    fn clone(&self) -> Self {
+        AmortizationBuilder {
+            principal: self.principal,
+            rate: self.rate,
+            term_months: self.term_months,
+            config: self.config,
+            payment_modifier: None,
+        }
     }
 }
 
@@ -82,66 +114,40 @@ impl AmortizationBuilder {
     /// * `principal` - The loan amount
     /// * `rate` - The annual interest rate
     /// * `term_months` - The loan term in months
+    ///
+    /// # Panics
+    /// This function does not panic.
     pub fn new(principal: Money, rate: Rate, term_months: u32) -> Self {
         AmortizationBuilder {
             principal,
             rate,
             term_months,
+            config: Config::default(),
             payment_modifier: None,
-            day_count_360: false,
-            start_date: None,
-            eps: Decimal::new(1, 2), // 0.01 tolerance
         }
+    }
+
+    /// Sets the solver configuration.
+    ///
+    /// # Panics
+    /// This function does not panic.
+    pub fn with_config(mut self, config: Config) -> Self {
+        self.config = config;
+        self
     }
 
     /// Sets a payment modifier function.
     ///
     /// The modifier receives the period number and base payment,
     /// and returns the modified payment amount.
+    ///
+    /// # Panics
+    /// This function does not panic.
     pub fn with_payment_modifier<F>(mut self, modifier: F) -> Self
     where
         F: Fn(u32, Money) -> Money + 'static,
     {
         self.payment_modifier = Some(Box::new(modifier));
-        self
-    }
-
-    /// Clones the builder (without the payment modifier).
-    pub fn clone_without_modifier(&self) -> Self {
-        AmortizationBuilder {
-            principal: self.principal,
-            rate: self.rate,
-            term_months: self.term_months,
-            payment_modifier: None,
-            day_count_360: self.day_count_360,
-            start_date: self.start_date,
-            eps: self.eps,
-        }
-    }
-}
-
-impl Clone for AmortizationBuilder {
-    fn clone(&self) -> Self {
-        self.clone_without_modifier()
-    }
-}
-
-impl AmortizationBuilder {
-    /// Sets the day count convention to 30/360.
-    pub fn with_30_360(mut self) -> Self {
-        self.day_count_360 = true;
-        self
-    }
-
-    /// Sets the start date for the schedule.
-    pub fn with_start_date(mut self, date: NaiveDate) -> Self {
-        self.start_date = Some(date);
-        self
-    }
-
-    /// Sets the convergence epsilon.
-    pub fn with_eps(mut self, eps: Decimal) -> Self {
-        self.eps = eps;
         self
     }
 
@@ -152,11 +158,11 @@ impl AmortizationBuilder {
     /// - Principal is zero or negative
     /// - Term is zero
     /// - Schedule fails to pay off within epsilon
+    ///
+    /// # Panics
+    /// This function does not panic.
     pub fn build(self) -> Result<AmortizationSchedule, CasifinError> {
-        debug_assert!(self.principal > Money::ZERO, "principal must be positive");
-        debug_assert!(self.term_months > 0, "term_months must be positive");
-
-        if self.principal <= Money::ZERO {
+        if self.principal.is_zero() || self.principal.is_negative() {
             return Err(CasifinError::InvalidAmount(self.principal));
         }
         if self.term_months == 0 {
@@ -166,78 +172,71 @@ impl AmortizationBuilder {
         self.generate_schedule()
     }
 
-    /// Computes the monthly payment and rate for the schedule.
-    fn compute_base_payment(&self) -> Result<(Decimal, Money), CasifinError> {
-        let monthly_rate = self.rate.annual_rate / Decimal::from(12);
-        let base_payment = pmt(
-            monthly_rate,
-            self.term_months,
-            self.principal,
-            Money::ZERO,
-            casifin_tvm::PaymentDue::End,
-        )?;
-        Ok((monthly_rate, base_payment))
-    }
-
-    /// Computes a single amortization entry for the given period.
-    fn compute_period_entry(
-        &self,
-        period: u32,
-        balance: Money,
-        monthly_rate: Decimal,
-        base_payment: Money,
-    ) -> (AmortizationEntry, Money) {
-        let interest = balance * monthly_rate;
-
-        let payment = match &self.payment_modifier {
-            Some(modifier) => modifier(period, base_payment),
-            None => base_payment,
-        };
-
-        let principal_payment = payment - interest;
-        let new_balance = balance - principal_payment;
-
-        let (principal_payment, payment, new_balance) = if period == self.term_months {
-            (balance, payment + new_balance, Money::ZERO)
-        } else {
-            (principal_payment, payment, new_balance)
-        };
-
-        let date = self.start_date.map(|start| {
-            start
-                .checked_add_months(chrono::Months::new(period))
-                .unwrap_or(start)
-        });
-
-        let entry = AmortizationEntry {
-            period,
-            payment,
-            principal: principal_payment,
-            interest,
-            balance: new_balance,
-            date,
-        };
-
-        (entry, new_balance)
+    /// Computes the monthly rate from the annual rate.
+    fn monthly_rate(&self) -> Result<Decimal, CasifinError> {
+        self.rate
+            .annual_rate
+            .checked_div(Decimal::from(12))
+            .ok_or(CasifinError::DivisionByZero {
+                operation: "monthly rate",
+            })
     }
 
     /// Generates the amortization schedule.
     fn generate_schedule(&self) -> Result<AmortizationSchedule, CasifinError> {
-        let (monthly_rate, base_payment) = self.compute_base_payment()?;
+        let monthly_rate = self.monthly_rate()?;
+
+        // Compute base payment using TVM: pv = -principal, fv = 0, nper = term_months
+        let base_payment = casifin_tvm::pmt(
+            self.rate,
+            self.term_months,
+            -self.principal,
+            Money::ZERO,
+            PaymentDue::End,
+        )?;
 
         let mut schedule = AmortizationSchedule::new();
         let mut balance = self.principal;
+
         let mut total_payments = Money::ZERO;
         let mut total_interest = Money::ZERO;
         let mut total_principal = Money::ZERO;
 
         for period in 1..=self.term_months {
-            let (entry, new_balance) =
-                self.compute_period_entry(period, balance, monthly_rate, base_payment);
+            if balance <= Money::ZERO {
+                break;
+            }
 
-            total_payments = total_payments + entry.payment;
-            total_interest = total_interest + entry.interest;
-            total_principal = total_principal + entry.principal;
+            let interest = balance * monthly_rate;
+
+            let payment = match &self.payment_modifier {
+                Some(modifier) => modifier(period, base_payment),
+                None => base_payment,
+            };
+
+            let principal_payment = payment - interest;
+            let mut new_balance = balance - principal_payment;
+            let mut actual_payment = payment;
+            let mut actual_principal = principal_payment;
+
+            // If paying off early or final period, adjust to exact remaining balance
+            if new_balance <= Money::ZERO || period == self.term_months {
+                actual_payment = payment + new_balance;
+                actual_principal = balance;
+                new_balance = Money::ZERO;
+            }
+
+            let entry = AmortizationEntry {
+                period,
+                payment: actual_payment,
+                principal: actual_principal,
+                interest,
+                balance: new_balance,
+            };
+
+            total_payments = total_payments + actual_payment;
+            total_interest = total_interest + interest;
+            total_principal = total_principal + actual_principal;
             balance = new_balance;
 
             schedule.entries.push(entry);
@@ -247,19 +246,22 @@ impl AmortizationBuilder {
         schedule.total_interest = total_interest;
         schedule.total_principal = total_principal;
 
-        self.verify_final_balance(&schedule)?;
+        self.verify_invariants(&schedule)?;
         Ok(schedule)
     }
 
-    /// Verifies the final balance is within epsilon of zero.
-    fn verify_final_balance(&self, schedule: &AmortizationSchedule) -> Result<(), CasifinError> {
+    /// Verifies the post-build invariants of the schedule.
+    fn verify_invariants(&self, schedule: &AmortizationSchedule) -> Result<(), CasifinError> {
+        let eps = self.config.eps;
+
+        // Final balance must be near zero
         let final_balance = schedule
             .entries
             .last()
             .map(|e| e.balance)
             .unwrap_or(Money::ZERO);
 
-        if final_balance.abs().inner() > self.eps {
+        if final_balance.abs().inner() > eps {
             return Err(CasifinError::ScheduleOverflow {
                 detail: format!(
                     "amortization did not fully pay off: balance={}",
@@ -267,227 +269,122 @@ impl AmortizationBuilder {
                 ),
             });
         }
+
+        // Total principal should equal original principal
+        let principal_diff = (schedule.total_principal - self.principal).abs();
+        if principal_diff.inner() > eps {
+            return Err(CasifinError::ScheduleOverflow {
+                detail: format!(
+                    "total principal {} does not match original principal {}",
+                    schedule.total_principal, self.principal
+                ),
+            });
+        }
+
+        // total_payments == total_principal + total_interest
+        let payments_diff =
+            (schedule.total_payments - (schedule.total_principal + schedule.total_interest)).abs();
+        if payments_diff.inner() > eps {
+            return Err(CasifinError::ScheduleOverflow {
+                detail: "payment/principal/interest identity violated".to_string(),
+            });
+        }
+
+        // Each entry: payment == principal + interest
+        for entry in &schedule.entries {
+            let entry_diff = (entry.payment - (entry.principal + entry.interest)).abs();
+            if entry_diff.inner() > eps {
+                return Err(CasifinError::ScheduleOverflow {
+                    detail: format!(
+                        "entry {} payment identity violated: payment={}, principal+interest={}",
+                        entry.period,
+                        entry.payment,
+                        entry.principal + entry.interest
+                    ),
+                });
+            }
+        }
+
         Ok(())
     }
 }
 
-/// Rate caps for an ARM.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct RateCaps {
-    /// Maximum rate increase per adjustment period.
-    pub periodic_cap: Decimal,
-    /// Maximum rate increase over the life of the loan.
-    pub lifetime_cap: Decimal,
-    /// Initial rate cap (for first adjustment).
-    pub initial_cap: Option<Decimal>,
-}
+// ============================================================================
+// ArmSchedule
+// ============================================================================
 
-impl RateCaps {
-    /// Creates new rate caps.
-    pub fn new(periodic_cap: Decimal, lifetime_cap: Decimal) -> Self {
-        RateCaps {
-            periodic_cap,
-            lifetime_cap,
-            initial_cap: None,
-        }
-    }
-
-    /// Sets the initial cap.
-    pub fn with_initial_cap(mut self, cap: Decimal) -> Self {
-        self.initial_cap = Some(cap);
-        self
-    }
-}
-
-/// An adjustable-rate mortgage (ARM) schedule.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AdjustableRateSchedule {
-    /// The initial rate.
-    pub initial_rate: Rate,
-    /// Rate adjustments: (period, new_rate).
+/// Configuration for an adjustable-rate mortgage (ARM) schedule.
+///
+/// # Panics
+/// This type does not panic.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArmSchedule {
     pub adjustments: Vec<(u32, Rate)>,
-    /// Rate caps (optional).
-    pub caps: Option<RateCaps>,
-    /// The generated schedule.
-    pub schedule: AmortizationSchedule,
+    pub periodic_cap: Option<Decimal>,
+    pub lifetime_cap: Option<Decimal>,
+    pub lifetime_floor: Option<Decimal>,
 }
 
-/// Builder for adjustable-rate schedules.
-#[derive(Debug, Clone)]
-pub struct AdjustableRateBuilder {
-    principal: Money,
-    initial_rate: Rate,
-    term_months: u32,
-    adjustments: Vec<(u32, Rate)>,
-    caps: Option<RateCaps>,
-    #[allow(dead_code)]
-    eps: Decimal,
-}
-
-impl AdjustableRateBuilder {
-    /// Creates a new ARM builder.
-    pub fn new(principal: Money, initial_rate: Rate, term_months: u32) -> Self {
-        AdjustableRateBuilder {
-            principal,
-            initial_rate,
-            term_months,
+impl ArmSchedule {
+    /// Creates a new `ArmSchedule`.
+    ///
+    /// # Panics
+    /// This function does not panic.
+    pub fn new() -> Self {
+        Self {
             adjustments: Vec::new(),
-            caps: None,
-            eps: Decimal::new(1, 2),
+            periodic_cap: None,
+            lifetime_cap: None,
+            lifetime_floor: None,
         }
     }
 
-    /// Adds a rate adjustment at the specified period.
+    /// Adds a rate adjustment.
+    ///
+    /// # Panics
+    /// This function does not panic.
     pub fn with_adjustment(mut self, period: u32, rate: Rate) -> Self {
         self.adjustments.push((period, rate));
         self
     }
 
-    /// Sets rate caps.
-    pub fn with_caps(mut self, caps: RateCaps) -> Self {
-        self.caps = Some(caps);
+    /// Sets the periodic cap.
+    ///
+    /// # Panics
+    /// This function does not panic.
+    pub fn with_periodic_cap(mut self, cap: Decimal) -> Self {
+        self.periodic_cap = Some(cap);
         self
     }
 
-    /// Builds the ARM schedule.
-    pub fn build(self) -> Result<AdjustableRateSchedule, CasifinError> {
-        debug_assert!(self.principal > Money::ZERO, "principal must be positive");
-        debug_assert!(self.term_months > 0, "term_months must be positive");
-
-        if self.principal <= Money::ZERO {
-            return Err(CasifinError::InvalidAmount(self.principal));
-        }
-        if self.term_months == 0 {
-            return Err(CasifinError::InvalidPeriod(0));
-        }
-
-        let mut schedule = AmortizationSchedule::new();
-        let mut balance = self.principal;
-        let mut current_rate = self.initial_rate;
-        let mut adjustment_idx = 0;
-
-        let mut total_payments = Money::ZERO;
-        let mut total_interest = Money::ZERO;
-        let mut total_principal = Money::ZERO;
-
-        let mut period = 1u32;
-        while period <= self.term_months && balance.inner() > Decimal::ZERO {
-            // Check for rate adjustment
-            if let Some(new_rate) =
-                self.check_rate_adjustment(period, &mut adjustment_idx, &mut current_rate)
-            {
-                current_rate = new_rate;
-            }
-
-            let (entry, new_balance) = self.compute_arm_period_entry(period, balance, current_rate);
-
-            total_payments = total_payments + entry.payment;
-            total_interest = total_interest + entry.interest;
-            total_principal = total_principal + entry.principal;
-            balance = new_balance;
-
-            schedule.entries.push(entry);
-            period += 1;
-        }
-
-        schedule.total_payments = total_payments;
-        schedule.total_interest = total_interest;
-        schedule.total_principal = total_principal;
-
-        Ok(AdjustableRateSchedule {
-            initial_rate: self.initial_rate,
-            adjustments: self.adjustments,
-            caps: self.caps,
-            schedule,
-        })
+    /// Sets the lifetime cap.
+    ///
+    /// # Panics
+    /// This function does not panic.
+    pub fn with_lifetime_cap(mut self, cap: Decimal) -> Self {
+        self.lifetime_cap = Some(cap);
+        self
     }
 
-    /// Checks and applies any rate adjustment for the current period.
-    /// Returns the new rate if an adjustment was applied.
-    fn check_rate_adjustment(
-        &self,
-        period: u32,
-        adjustment_idx: &mut usize,
-        current_rate: &mut Rate,
-    ) -> Option<Rate> {
-        if *adjustment_idx >= self.adjustments.len() {
-            return None;
-        }
-        let (adj_period, new_rate) = self.adjustments[*adjustment_idx];
-        if period < adj_period {
-            return None;
-        }
-        *adjustment_idx += 1;
-
-        let adjusted = if let Some(caps) = &self.caps {
-            Self::apply_rate_caps(*current_rate, new_rate, caps)
-        } else {
-            new_rate
-        };
-        Some(adjusted)
-    }
-
-    /// Applies rate caps to limit the adjustment magnitude.
-    fn apply_rate_caps(current: Rate, proposed: Rate, caps: &RateCaps) -> Rate {
-        let rate_diff = proposed.annual_rate - current.annual_rate;
-        let max_increase = caps.periodic_cap;
-        if rate_diff > max_increase {
-            Rate {
-                annual_rate: current.annual_rate + max_increase,
-                ..proposed
-            }
-        } else if rate_diff < -max_increase {
-            Rate {
-                annual_rate: current.annual_rate - max_increase,
-                ..proposed
-            }
-        } else {
-            proposed
-        }
-    }
-
-    /// Computes a single ARM period entry.
-    fn compute_arm_period_entry(
-        &self,
-        period: u32,
-        balance: Money,
-        current_rate: Rate,
-    ) -> (AmortizationEntry, Money) {
-        let monthly_rate = current_rate.annual_rate / Decimal::from(12);
-        let remaining_periods = self.term_months - period + 1;
-
-        let payment = pmt(
-            monthly_rate,
-            remaining_periods,
-            balance,
-            Money::ZERO,
-            casifin_tvm::PaymentDue::End,
-        )
-        .unwrap_or(Money::ZERO);
-
-        let interest = balance * monthly_rate;
-        let principal_payment = payment - interest;
-        let new_balance = balance - principal_payment;
-
-        let (principal_payment, payment, new_balance) =
-            if new_balance <= Money::ZERO || period == self.term_months {
-                (balance, payment + new_balance, Money::ZERO)
-            } else {
-                (principal_payment, payment, new_balance)
-            };
-
-        let entry = AmortizationEntry {
-            period,
-            payment,
-            principal: principal_payment,
-            interest,
-            balance: new_balance,
-            date: None,
-        };
-
-        (entry, new_balance)
+    /// Sets the lifetime floor.
+    ///
+    /// # Panics
+    /// This function does not panic.
+    pub fn with_lifetime_floor(mut self, floor: Decimal) -> Self {
+        self.lifetime_floor = Some(floor);
+        self
     }
 }
+
+impl Default for ArmSchedule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -496,49 +393,88 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_fixed_rate_amortization() {
-        let principal = Money::from(200000);
-        let rate = Rate::new(
-            Decimal::new(6, 2),
-            Compounding::MONTHLY,
-            casifin_core::DayCount::Actual365,
-        )
-        .unwrap();
+    fn fixed_30_year_mortgage() {
+        let principal = Money::from_decimal(Decimal::new(300000, 0));
+        let rate = Rate::new(Decimal::new(425, 4), Compounding::Discrete(12)).unwrap();
 
         let schedule = AmortizationBuilder::new(principal, rate, 360)
             .build()
             .unwrap();
 
         assert_eq!(schedule.entries.len(), 360);
-        assert!(schedule.total_interest > Money::ZERO);
-        // Allow for small rounding differences
-        let principal_diff = (schedule.total_principal - principal).abs();
-        assert!(principal_diff <= Money::from(1));
-        assert!(schedule.entries.last().unwrap().balance <= Money::from(1));
+
+        let first = &schedule.entries[0];
+        // First payment should be approximately $1,475.82
+        assert!(first.payment > Money::from_decimal(Decimal::new(1475, 0)));
+        assert!(first.payment < Money::from_decimal(Decimal::new(1476, 0)));
+
+        // First interest should be approximately $1,062.50
+        assert!(first.interest > Money::from_decimal(Decimal::new(1062, 0)));
+        assert!(first.interest < Money::from_decimal(Decimal::new(1063, 0)));
+
+        // First principal should be approximately $413.32
+        assert!(first.principal > Money::from_decimal(Decimal::new(413, 0)));
+        assert!(first.principal < Money::from_decimal(Decimal::new(414, 0)));
+
+        // Final balance should be zero
+        let final_balance = schedule.entries.last().unwrap().balance;
+        assert!(final_balance.abs() <= Money::from_decimal(Decimal::new(1, 2)));
     }
 
     #[test]
-    fn test_arm_schedule() {
-        let principal = Money::from(200000);
-        let initial_rate = Rate::new(
-            Decimal::new(5, 2),
-            Compounding::MONTHLY,
-            casifin_core::DayCount::Actual365,
-        )
-        .unwrap();
+    fn payment_modifier() {
+        let principal = Money::from_decimal(Decimal::new(300000, 0));
+        let rate = Rate::new(Decimal::new(425, 4), Compounding::Discrete(12)).unwrap();
 
-        let adj_rate = Rate::new(
-            Decimal::new(7, 2),
-            Compounding::MONTHLY,
-            casifin_core::DayCount::Actual365,
-        )
-        .unwrap();
-
-        let arm = AdjustableRateBuilder::new(principal, initial_rate, 360)
-            .with_adjustment(61, adj_rate)
+        // Extra $100 principal each month
+        let schedule = AmortizationBuilder::new(principal, rate, 360)
+            .with_payment_modifier(|_period, base_payment| {
+                base_payment + Money::from_decimal(Decimal::new(100, 0))
+            })
             .build()
             .unwrap();
 
-        assert!(!arm.schedule.entries.is_empty());
+        // Should pay off earlier than 360 months
+        assert!(schedule.entries.len() < 360);
+    }
+
+    #[test]
+    fn zero_rate() {
+        let principal = Money::from_decimal(Decimal::new(120000, 0));
+        let rate = Rate::new(Decimal::ZERO, Compounding::Discrete(12)).unwrap();
+
+        let schedule = AmortizationBuilder::new(principal, rate, 360)
+            .build()
+            .unwrap();
+
+        // Each period principal = 120000 / 360 = 333.33
+        let first = &schedule.entries[0];
+        assert_eq!(
+            first.principal,
+            Money::from_decimal(Decimal::new(120000, 0)) / Decimal::from(360)
+        );
+    }
+
+    #[test]
+    fn invalid_principal() {
+        let rate = Rate::new(Decimal::new(5, 2), Compounding::Discrete(12)).unwrap();
+        let result = AmortizationBuilder::new(Money::ZERO, rate, 360).build();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn invariant_final_balance() {
+        let principal = Money::from_decimal(Decimal::new(200000, 0));
+        let rate = Rate::new(Decimal::new(6, 2), Compounding::Discrete(12)).unwrap();
+
+        let schedule = AmortizationBuilder::new(principal, rate, 360)
+            .build()
+            .unwrap();
+
+        let final_balance = schedule.entries.last().unwrap().balance;
+        assert!(final_balance.abs() <= Money::from_decimal(Decimal::new(1, 2)));
+
+        let principal_diff = (schedule.total_principal - principal).abs();
+        assert!(principal_diff <= Money::from_decimal(Decimal::new(1, 2)));
     }
 }

@@ -163,8 +163,6 @@ dependencies = [
  "casifin-core",
  "casifin-tvm",
  "chrono",
- "criterion",
- "proptest",
  "rust_decimal",
  "serde",
  "thiserror",
@@ -177,9 +175,8 @@ dependencies = [
  "approx",
  "casifin-core",
  "chrono",
- "criterion",
- "proptest",
  "rust_decimal",
+ "serde",
  "thiserror",
 ]
 
@@ -189,7 +186,6 @@ version = "0.1.0"
 dependencies = [
  "approx",
  "chrono",
- "proptest",
  "rust_decimal",
  "serde",
  "thiserror",
@@ -201,9 +197,8 @@ version = "0.1.0"
 dependencies = [
  "approx",
  "casifin-core",
- "chrono",
- "proptest",
  "rust_decimal",
+ "serde",
  "thiserror",
 ]
 
@@ -214,8 +209,8 @@ dependencies = [
  "approx",
  "casifin-core",
  "chrono",
- "proptest",
  "rust_decimal",
+ "serde",
  "thiserror",
 ]
 
@@ -227,8 +222,8 @@ dependencies = [
  "casifin-cashflow",
  "casifin-core",
  "chrono",
- "proptest",
  "rust_decimal",
+ "serde",
  "thiserror",
 ]
 
@@ -258,10 +253,8 @@ version = "0.1.0"
 dependencies = [
  "approx",
  "casifin-core",
- "chrono",
- "criterion",
- "proptest",
  "rust_decimal",
+ "serde",
  "thiserror",
 ]
 
