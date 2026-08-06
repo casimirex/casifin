@@ -1,12 +1,67 @@
 name: CI
+
 on: [push, pull_request]
+
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   check:
+    name: Format, Lint, Test, Docs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo fmt --check
-      - run: cargo clippy --workspace -- -D warnings
-      - run: cargo test --workspace
-      - run: cargo doc --workspace --no-deps
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --check
+
+      # --all-targets so tests, examples, and benches are linted too. Without
+      # it only library code is checked, and a broken test or bench passes CI.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Docs
+        run: cargo doc --workspace --no-deps
+
+      # Required by the Quality Gates section of the README. An example that
+      # stops compiling is the first thing a new user hits.
+      - name: Run the getting-started example
+        run: cargo run --example tutorial_01_getting_started
+
+      # Benches are compiled but not run: criterion needs a stable machine to
+      # produce meaningful timings, which a shared runner is not. Compiling
+      # catches the breakage that matters here.
+      - name: Check benches compile
+        run: cargo bench --no-run
+
+  features:
+    name: Feature Combinations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "features"
+
+      # Every crate declares a `serde` feature that is not in `default`, so the
+      # job above never compiles that code at all — it could break without any
+      # CI run noticing. `std` has the mirror problem: it is on by default, so
+      # the no-default-features path is equally unvisited.
+      - name: Clippy with all features
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test with all features
+        run: cargo test --workspace --all-features
+
+      - name: Build without default features
+        run: cargo build --workspace --no-default-features

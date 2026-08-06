@@ -2,7 +2,7 @@
 
 A Rust-based financial computation engine built with NASA-grade engineering standards.
 
-[![CI](https://github.com/yourorg/casifin/actions/workflows/ci.yml/badge.svg)](https://github.com/yourorg/casifin/actions/workflows/ci.yml)
+[![CI](https://github.com/casimirex/casifin/actions/workflows/ci.yml/badge.svg)](https://github.com/casimirex/casifin/actions/workflows/ci.yml)
 
 ## Overview
 
@@ -38,7 +38,7 @@ Every crate enforces NASA/JPL Power-of-Ten inspired rules:
 
 ```toml
 [dependencies]
-casifin_sdk = "0.1.0"
+casifin-sdk = "0.1.0"
 rust_decimal = { version = "1.35", features = ["maths"] }
 ```
 
